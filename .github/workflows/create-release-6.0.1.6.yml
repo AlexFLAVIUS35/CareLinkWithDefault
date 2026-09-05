@@ -43,14 +43,12 @@ jobs:
           if ($login -notmatch 'Imports System.Threading.Tasks') {
             $login = $login.Replace('Imports System.Net.Http' + [Environment]::NewLine, 'Imports System.Net.Http' + [Environment]::NewLine + 'Imports System.Threading.Tasks' + [Environment]::NewLine)
           }
+          $login = $login.Replace('Dim discoveryTask As Task(Of DiscoveryRecord) = GetDiscoveryDataAsync()', 'Dim discoveryTask As Task(Of DiscoveryRecord) = Task.Run(Function() GetDiscoveryDataAsync())')
+          if ($login -notmatch 'Task\.Run\(Function\(\) GetDiscoveryDataAsync\(\)\)') { throw 'Discovery was not moved off the UI thread.' }
           if ($login -notmatch 'Task\.WhenAny\(discoveryTask') {
             $oldDiscovery = 'Dim discoveryResult As DiscoveryRecord = Await GetDiscoveryDataAsync()'
-            $newDiscovery = '            Me.LoginStatus.Text = "Loading CareLink discovery configuration..."' + [Environment]::NewLine + '            Me.Refresh()' + [Environment]::NewLine + '            Dim discoveryTask As Task(Of DiscoveryRecord) = GetDiscoveryDataAsync()' + [Environment]::NewLine + '            Dim discoveryCompleted As Task = Await Task.WhenAny(discoveryTask, Task.Delay(TimeSpan.FromSeconds(20)))' + [Environment]::NewLine + '            If Not Object.ReferenceEquals(discoveryCompleted, discoveryTask) Then' + [Environment]::NewLine + '                Throw New TimeoutException("CareLink discovery timed out after 20 seconds. Check your internet connection and try again.")' + [Environment]::NewLine + '            End If' + [Environment]::NewLine + '            Dim discoveryResult As DiscoveryRecord = Await discoveryTask'
-            if ($login.Contains($oldDiscovery)) {
-              $login = $login.Replace($oldDiscovery, $newDiscovery)
-            } else {
-              throw 'Could not locate GetDiscoveryDataAsync call.'
-            }
+            $newDiscovery = '            Me.LoginStatus.Text = "Loading CareLink discovery configuration..."' + [Environment]::NewLine + '            Me.Refresh()' + [Environment]::NewLine + '            Dim discoveryTask As Task(Of DiscoveryRecord) = Task.Run(Function() GetDiscoveryDataAsync())' + [Environment]::NewLine + '            Dim discoveryCompleted As Task = Await Task.WhenAny(discoveryTask, Task.Delay(TimeSpan.FromSeconds(20)))' + [Environment]::NewLine + '            If Not Object.ReferenceEquals(discoveryCompleted, discoveryTask) Then' + [Environment]::NewLine + '                Throw New TimeoutException("CareLink discovery timed out after 20 seconds. Check your internet connection and try again.")' + [Environment]::NewLine + '            End If' + [Environment]::NewLine + '            Dim discoveryResult As DiscoveryRecord = Await discoveryTask'
+            if ($login.Contains($oldDiscovery)) { $login = $login.Replace($oldDiscovery, $newDiscovery) } else { throw 'Could not locate GetDiscoveryDataAsync call.' }
           }
           if ($login -notmatch 'Task\.WhenAny\(discoveryTask') { throw 'Login discovery timeout fix could not be verified.' }
           $login = $login.Replace('Me.Ok_Button.Enabled = False' + [Environment]::NewLine + '                Application.DoEvents()', 'Me.LoginStatus.Text = "Opening CareLink login..."' + [Environment]::NewLine + '                Me.Ok_Button.Enabled = False' + [Environment]::NewLine + '                Application.DoEvents()')
@@ -60,13 +58,7 @@ jobs:
           if ($login -notmatch [regex]::Escape($newCatchMarker)) {
             $catchPattern = '(?s)Catch ex As Exception\r?\n            Stop\r?\n        Finally\r?\n            Me\.Ok_Button\.Enabled = True\r?\n            Me\.Cancel_Button\.Enabled = True'
             $nl = [Environment]::NewLine
-            $catchReplacement = 'Catch ex As Exception' + $nl +
-                '            Dim errorMessage As String = If(String.IsNullOrWhiteSpace(ex.Message), "The login operation failed.", ex.Message)' + $nl +
-                '            ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))' + $nl +
-                '            MessageBox.Show(Me, errorMessage, "CareLink Login", MessageBoxButtons.OK, MessageBoxIcon.Error)' + $nl +
-                '        Finally' + $nl +
-                '            Me.Ok_Button.Enabled = True' + $nl +
-                '            Me.Cancel_Button.Enabled = True'
+            $catchReplacement = 'Catch ex As Exception' + $nl + '            Dim errorMessage As String = If(String.IsNullOrWhiteSpace(ex.Message), "The login operation failed.", ex.Message)' + $nl + '            ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))' + $nl + '            MessageBox.Show(Me, errorMessage, "CareLink Login", MessageBoxButtons.OK, MessageBoxIcon.Error)' + $nl + '        Finally' + $nl + '            Me.Ok_Button.Enabled = True' + $nl + '            Me.Cancel_Button.Enabled = True'
             $patchedLogin = [regex]::Replace($login, $catchPattern, $catchReplacement, 1)
             if ($patchedLogin -eq $login) { throw 'LoginDialog exception handler could not be located.' }
             $login = $patchedLogin
