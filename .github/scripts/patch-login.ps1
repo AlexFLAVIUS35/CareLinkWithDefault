@@ -13,20 +13,22 @@ $service = $service.Replace(
     'If String.IsNullOrWhiteSpace(value:=magIdentifier) Then',
     'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
 
-# VB requires explicit continuation for this chained JsonElement access in the current project/toolchain.
+# Flatten the fragile provider JSON chain so the VB compiler does not depend on line continuation parsing.
 $service = $service.Replace(
     'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0).`r`n                                                 GetProperty(propertyName:="provider").`r`n                                                 GetProperty(propertyName:="auth_url").GetString()',
-    'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0). _`r`n                                                 GetProperty(propertyName:="provider"). _`r`n                                                 GetProperty(propertyName:="auth_url").GetString()')
+    'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0).GetProperty(propertyName:="provider").GetProperty(propertyName:="auth_url").GetString()')
 $service = $service.Replace(
     'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0).' + [Environment]::NewLine + '                                                 GetProperty(propertyName:="provider").' + [Environment]::NewLine + '                                                 GetProperty(propertyName:="auth_url").GetString()',
-    'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0). _' + [Environment]::NewLine + '                                                 GetProperty(propertyName:="provider"). _' + [Environment]::NewLine + '                                                 GetProperty(propertyName:="auth_url").GetString()')
+    'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0).GetProperty(propertyName:="provider").GetProperty(propertyName:="auth_url").GetString()')
 
 $stopPattern = "Catch ex As Exception\r?\n\s*Stop"
 $stopReplacement = 'Catch ex As Exception' + [Environment]::NewLine + '                            Throw New ApplicationException(message:=$"Failed to parse CareLink endpoint configuration: {ex.Message}", innerException:=ex)'
 $service = [regex]::Replace($service, $stopPattern, $stopReplacement, 1)
 
-$authPattern = '(?s)\s*'' Ensure the UI dialog and WebView2 initialization run on the UI thread\.\s*redirectResult = Await InvokeOnUiThreadAsync\(.*?End Function\)'
-$authReplacement = @'
+# Patch the old Auth0 WebView/OAuthBrowserForm block when it is still present.
+if ($service -match 'OAuthBrowserForm') {
+    $authPattern = '(?s)\s*'' Ensure the UI dialog and WebView2 initialization run on the UI thread\.\s*redirectResult = Await InvokeOnUiThreadAsync\(.*?End Function\)'
+    $authReplacement = @'
         ' Use the Windows default browser directly.
         Do
             Try
@@ -48,11 +50,14 @@ $authReplacement = @'
             End Try
         Loop
 '@
-if ($service -notmatch $authPattern) { throw 'Auth0 browser block could not be located.' }
-$service = [regex]::Replace($service, $authPattern, $authReplacement, 1)
+    if ($service -notmatch $authPattern) { throw 'Auth0 browser block could not be located.' }
+    $service = [regex]::Replace($service, $authPattern, $authReplacement, 1)
+}
 
-$nonAuthPattern = '(?s)\s*Dim redirectResult As RedirectResult\s*Do\s*Using frm As New OAuthBrowserForm\(startUrl:=captchaUrl,.*?End Using\s*Loop'
-$nonAuthReplacement = @'
+# Patch the old non-Auth0 OAuthBrowserForm loop when it is still present.
+if ($service -match 'OAuthBrowserForm') {
+    $nonAuthPattern = '(?s)\s*Dim redirectResult As RedirectResult\s*Do\s*Using frm As New OAuthBrowserForm\(startUrl:=captchaUrl,.*?End Using\s*Loop'
+    $nonAuthReplacement = @'
                     Dim redirectResult As RedirectResult
                     Do
                         Try
@@ -74,12 +79,45 @@ $nonAuthReplacement = @'
                         End Try
                     Loop
 '@
-if ($service -notmatch $nonAuthPattern) { throw 'Non-Auth0 browser block could not be located.' }
-$service = [regex]::Replace($service, $nonAuthPattern, $nonAuthReplacement, 1)
+    if ($service -notmatch $nonAuthPattern) { throw 'Non-Auth0 browser block could not be located.' }
+    $service = [regex]::Replace($service, $nonAuthPattern, $nonAuthReplacement, 1)
+}
+
+# The browser helper only accepts startUrl, redirectUri, and cancellationToken.
+# Keep this idempotent so already-patched source is also safe.
+$service = $service.Replace(
+    'redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(' + [Environment]::NewLine +
+    '            startUrl:=fullUrl,' + [Environment]::NewLine +
+    '            redirectUri:=redirectUri,' + [Environment]::NewLine +
+    '            userName:=userName,' + [Environment]::NewLine +
+    '            password:=password)',
+    'redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(' + [Environment]::NewLine +
+    '            startUrl:=fullUrl,' + [Environment]::NewLine +
+    '            redirectUri:=redirectUri,' + [Environment]::NewLine +
+    '            cancellationToken:=Threading.CancellationToken.None)')
+$service = $service.Replace(
+    'redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(' + [Environment]::NewLine +
+    '                        startUrl:=captchaUrl,' + [Environment]::NewLine +
+    '                        redirectUri:=redirectUri,' + [Environment]::NewLine +
+    '                        userName:=userName,' + [Environment]::NewLine +
+    '                        password:=password)',
+    'redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(' + [Environment]::NewLine +
+    '                        startUrl:=captchaUrl,' + [Environment]::NewLine +
+    '                        redirectUri:=redirectUri,' + [Environment]::NewLine +
+    '                        cancellationToken:=Threading.CancellationToken.None)')
+
+# InvokeOnUiThreadAsync(Of T) is asynchronous, so return the T result rather than Task(Of T).
+$service = $service.Replace(
+    '        Return tcs.Task' + [Environment]::NewLine +
+    '    End Function',
+    '        Return Await tcs.Task' + [Environment]::NewLine +
+    '    End Function')
 
 if ($service -match 'OAuthBrowserForm') { throw 'CareLinkService still references OAuthBrowserForm.' }
 if ($service -notmatch 'DefaultBrowserOAuth\.CaptureRedirectAsync') { throw 'Direct default-browser OAuth was not applied.' }
-if ($service -match 'providersDoc\.RootElement\.GetProperty\(propertyName:="providers"\)\(index:=0\)\.\r?\n') { throw 'Provider JSON chain still lacks explicit line continuation.' }
+if ($service -match 'providersDoc\.RootElement\.GetProperty\(propertyName:="providers"\)\(index:=0\)\.\r?\n') { throw 'Provider JSON chain still contains the fragile split form.' }
+if ($service -match 'CaptureRedirectAsync\([\s\S]*?userName:=userName') { throw 'CaptureRedirectAsync still receives obsolete userName/password arguments.' }
+if ($service -match 'Return tcs\.Task\r?\n\s*End Function') { throw 'InvokeOnUiThreadAsync still returns Task(Of T) instead of T.' }
 Set-Content -Path $servicePath -Value $service -Encoding UTF8
 
 $loginPath = 'src/CareLink/Dialogs/LoginDialog.vb'
