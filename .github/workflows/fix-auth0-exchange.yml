@@ -1,28 +1,31 @@
 name: Fix Auth0 token exchange
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: ${{ github.event.head_commit.message != 'Fix Auth0 token exchange request' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Patch Auth0 token exchange
+        shell: python
         run: |
-          python3 <<'PY'
           from pathlib import Path
 
-          path = Path('src/CareLink/Helpers/LoginHelpers/CareLinkService.vb')
-          text = path.read_text(encoding='utf-8-sig')
+          path = Path("src/CareLink/Helpers/LoginHelpers/CareLinkService.vb")
+          text = path.read_text(encoding="utf-8-sig")
+
+          if "client_secret" in text and "CareLink/6.0.1.6" in text:
+              print("Auth0 exchange is already patched.")
+              raise SystemExit(0)
 
           old = '''        Dim clientId As String = client.ClientId
         Dim scope As String = client.Scope
@@ -32,7 +35,7 @@ jobs:
         Dim scope As String = client.Scope
 '''
           if old not in text:
-              raise SystemExit('Could not find Auth0 client configuration block.')
+              raise SystemExit("Could not find Auth0 client configuration block.")
           text = text.replace(old, new, 1)
 
           old = '''        Dim form As New List(Of KeyValuePair(Of String, String)) From {
@@ -62,7 +65,7 @@ jobs:
                 Dim response As HttpResponseMessage = Await s_http.SendAsync(request)
 '''
           if old not in text:
-              raise SystemExit('Could not find Auth0 token request block.')
+              raise SystemExit("Could not find Auth0 token request block.")
           text = text.replace(old, new, 1)
 
           old = '''        If Not response.IsSuccessStatusCode Then
@@ -80,7 +83,7 @@ jobs:
                 Dim token As TokenData = Nothing
 '''
           if old not in text:
-              raise SystemExit('Could not find Auth0 response block.')
+              raise SystemExit("Could not find Auth0 response block.")
           text = text.replace(old, new, 1)
 
           old = '''        If Not body.TryFromJson(result:=token) Then
@@ -104,17 +107,27 @@ jobs:
     End Function
 '''
           if old not in text:
-              raise SystemExit('Could not find Auth0 method ending.')
+              raise SystemExit("Could not find Auth0 method ending.")
           text = text.replace(old, new, 1)
 
-          path.write_text(text, encoding='utf-8-sig', newline='\n')
-          PY
+          path.write_text(text, encoding="utf-8-sig", newline="\n")
+          print("Auth0 token exchange patched successfully.")
+
+      - name: Verify patch
+        shell: bash
+        run: |
+          grep -n -A8 -B4 'client_secret' src/CareLink/Helpers/LoginHelpers/CareLinkService.vb
+          grep -n 'CareLink/6.0.1.6' src/CareLink/Helpers/LoginHelpers/CareLinkService.vb
 
       - name: Commit patched source
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/CareLink/Helpers/LoginHelpers/CareLinkService.vb
-          git diff --cached --quiet && exit 0
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
           git commit -m "Fix Auth0 token exchange request"
           git push
