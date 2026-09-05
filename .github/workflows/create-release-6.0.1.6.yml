@@ -29,9 +29,17 @@ jobs:
         run: |
           $servicePath = "src/CareLink/Helpers/LoginHelpers/CareLinkService.vb"
           $service = Get-Content -Raw -Encoding UTF8 $servicePath
+          $service = $service.Replace('Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(120)}', 'Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(30)}')
           $service = $service.Replace('If String.IsNullOrWhiteSpace(value:=magIdentifier) Then', 'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
+          $service = $service.Replace('Catch ex As Exception' + [Environment]::NewLine + '                            Stop', 'Catch ex As Exception' + [Environment]::NewLine + '                            Throw New ApplicationException(message:=$"Failed to parse CareLink endpoint configuration: {ex.Message}", innerException:=ex)')
+          if ($service -notmatch 'TimeSpan\.FromSeconds\(30\)') {
+            throw 'HTTP timeout fix could not be verified.'
+          }
           if ($service -notmatch 'If Not String\.IsNullOrWhiteSpace\(value:=magIdentifier\) Then') {
             throw 'mag-identifier header fix could not be verified.'
+          }
+          if ($service -match 'Catch ex As Exception\r?\n\s+Stop') {
+            throw 'A discovery exception handler still contains Stop.'
           }
           Set-Content -Path $servicePath -Value $service -Encoding UTF8
 
@@ -89,7 +97,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/CareLink/Helpers/LoginHelpers/CareLinkService.vb src/CareLink/Dialogs/LoginDialog.vb
           if (-not (git diff --cached --quiet)) {
-            git commit -m "Harden CareLink login error handling"
+            git commit -m "Fix CareLink discovery login hang"
             git push
           } else {
             Write-Host "Login source patch was already committed."
