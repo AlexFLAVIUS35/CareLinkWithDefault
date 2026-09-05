@@ -141,7 +141,7 @@ Friend Module DefaultBrowserOAuth
             schemeKey.SetValue("URL Protocol", "", RegistryValueKind.String)
 
             Using commandKey As RegistryKey = schemeKey.CreateSubKey("shell\open\command")
-                commandKey.SetValue("", String.Format("""{0}" "%1"", executablePath), RegistryValueKind.String)
+                commandKey.SetValue("", String.Format("""{0}"" ""%1""", executablePath), RegistryValueKind.String)
             End Using
         End Using
     End Sub
