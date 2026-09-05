@@ -10,7 +10,7 @@ Imports System.Text.Json
 Imports System.Text.RegularExpressions
 
 Public Class CareLinkService
-    Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(120)}
+    Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(30)}
     Public Const DiscoveryUrlEu As String = "https://clcloud.minimed.eu/connect/carepartner/v13/discover/android/3.6"
     Public Const DiscoveryUrlNa As String = "https://clcloud.minimed.com/connect/carepartner/v13/discover/android/3.6"
     Public Const KeySizeInBits As Integer = 2048
@@ -514,7 +514,7 @@ Public Class CareLinkService
                                 .ApiBaseUrl = apiBaseUrl,
                                 .IsAuth0 = isAuth0}
                         Catch ex As Exception
-                            Stop
+                            Throw New ApplicationException(message:=$"Failed to parse CareLink endpoint configuration: {ex.Message}", innerException:=ex)
                         End Try
                     End Using
                 End If
@@ -524,5 +524,6 @@ Public Class CareLinkService
     End Function
 
 End Class
+
 
 
