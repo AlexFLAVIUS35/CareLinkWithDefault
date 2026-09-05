@@ -75,8 +75,7 @@ Public Class CareLinkService
         redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(
             startUrl:=fullUrl,
             redirectUri:=redirectUri,
-            userName:=userName,
-            password:=password)
+            cancellationToken:=Threading.CancellationToken.None)
 
         If redirectResult Is Nothing OrElse IsNullOrWhiteSpace(value:=redirectResult.Code) Then
             message = "Authorization code was not captured."
@@ -215,8 +214,7 @@ Public Class CareLinkService
                     redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(
                         startUrl:=captchaUrl,
                         redirectUri:=redirectUri,
-                        userName:=userName,
-                        password:=password)
+                        cancellationToken:=Threading.CancellationToken.None)
 
                     If redirectResult Is Nothing OrElse IsNullOrWhiteSpace(value:=redirectResult.Code) Then
                         Throw New Exception(message:="Captcha authorization code was not captured.")
@@ -342,7 +340,7 @@ Public Class CareLinkService
             tcs.SetException(ex)
         End Try
 
-        Return tcs.Task
+        Return Await tcs.Task
     End Function
 
     Private Shared Function RandomAndroidModel() As String
@@ -475,3 +473,4 @@ Public Class CareLinkService
     End Function
 
 End Class
+
