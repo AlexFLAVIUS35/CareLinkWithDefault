@@ -1,29 +1,129 @@
-name: Create CareLink 6.0.1.6 release
+name: Build CareLink fixed release
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - src/CareLink/Helpers/LoginHelpers/CareLinkService.vb
+      - src/CareLink/Helpers/LoginHelpers/OAuthBrowserForm.vb
+      - src/CareLink/Helpers/LoginHelpers/DefaultBrowserOAuth.vb
+      - .github/workflows/create-release-6.0.1.6.yml
 
 permissions:
   contents: write
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
-      - name: Download upstream release assets
-        run: |
-          curl -L --fail -o CareLink6.0.1.6.zip https://github.com/paul1956/CareLink/releases/download/6.0.1.6/CareLink6.0.1.6.zip
-          curl -L --fail -o 6.0.1.6-source.zip https://github.com/paul1956/CareLink/archive/refs/tags/6.0.1.6.zip
-          curl -L --fail -o 6.0.1.6-source.tar.gz https://github.com/paul1956/CareLink/archive/refs/tags/6.0.1.6.tar.gz
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Create release and upload assets
+      - name: Patch Auth0 token exchange
+        shell: pwsh
+        run: |
+          $path = "src/CareLink/Helpers/LoginHelpers/CareLinkService.vb"
+          $text = Get-Content -Raw -Encoding UTF8 $path
+
+          if ($text -notmatch 'Dim clientSecret As String = client\.ClientSecret') {
+            $old = 'Dim clientId As String = client.ClientId\r?\n        Dim scope As String = client.Scope'
+            $new = "Dim clientId As String = client.ClientId`r`n        Dim clientSecret As String = client.ClientSecret`r`n        Dim scope As String = client.Scope"
+            $text = [regex]::Replace($text, $old, $new, 1)
+          }
+
+          $pattern = '(?s)        Dim form As New List\(Of KeyValuePair\(Of String, String\)\) From \{.*?        Dim body As String = Await response\.Content\.ReadAsStringAsync\(\)'
+          $replacement = @'
+        Dim form As New List(Of KeyValuePair(Of String, String)) From {
+            New KeyValuePair(Of String, String)(key:="grant_type", value:="authorization_code"),
+            New KeyValuePair(Of String, String)(key:="client_id", value:=clientId),
+            New KeyValuePair(Of String, String)(key:="code", value:=redirectResult.Code),
+            New KeyValuePair(Of String, String)(key:="redirect_uri", value:=redirectUri)}
+
+        If Not String.IsNullOrWhiteSpace(clientSecret) Then
+            form.Add(New KeyValuePair(Of String, String)(key:="client_secret", value:=clientSecret))
+        End If
+
+        Using content As New FormUrlEncodedContent(nameValueCollection:=form)
+            Using request As New HttpRequestMessage(method:=HttpMethod.Post, requestUri:=tokenUrl)
+                request.Headers.Accept.Add(New System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"))
+                request.Headers.UserAgent.ParseAdd("CareLink/6.0.1.6")
+                request.Content = content
+
+                Dim response As HttpResponseMessage = Await s_http.SendAsync(request)
+                Dim body As String = Await response.Content.ReadAsStringAsync()
+'@
+          $updated = [regex]::Replace($text, $pattern, $replacement, 1)
+          if ($updated -eq $text) {
+            if ($text -match 'client_secret' -and $text -match 'CareLink/6\.0\.1\.6') {
+              Write-Host "Auth0 exchange already patched."
+            } else {
+              throw "Could not locate the Auth0 token request block."
+            }
+          } else {
+            $text = $updated
+          }
+
+          if ($text -match 'Using content As New FormUrlEncodedContent' -and $text -notmatch 'End Using\s+End Using\s+End Function') {
+            $oldEnd = '        Return token\r?\n    End Function'
+            $newEnd = "        Return token`r`n            End Using`r`n        End Using`r`n    End Function"
+            $text = [regex]::Replace($text, $oldEnd, $newEnd, 1)
+          }
+
+          if ($text -notmatch 'client_secret' -or $text -notmatch 'CareLink/6\.0\.1\.6') {
+            throw "Auth0 patch verification failed."
+          }
+
+          Set-Content -Path $path -Value $text -Encoding UTF8
+          Write-Host "Auth0 token exchange patched."
+
+      - name: Install .NET 11 preview SDK
+        shell: pwsh
+        run: |
+          Invoke-WebRequest 'https://dot.net/v1/dotnet-install.ps1' -OutFile "$env:TEMP\dotnet-install.ps1"
+          & "$env:TEMP\dotnet-install.ps1" -Channel 11.0 -Quality preview -InstallDir "$env:GITHUB_WORKSPACE\.dotnet"
+          & "$env:GITHUB_WORKSPACE\.dotnet\dotnet.exe" --version
+
+      - name: Restore
+        shell: pwsh
+        run: .\.dotnet\dotnet.exe restore CareLink.sln
+
+      - name: Build and publish Windows app
+        shell: pwsh
+        run: |
+          .\.dotnet\dotnet.exe publish src\CareLink\CareLink.vbproj -c Release -r win-x64 --self-contained false -o publish
+
+      - name: Commit source patch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/CareLink/Helpers/LoginHelpers/CareLinkService.vb
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "Fix Auth0 token exchange request"
+            git push
+          } else {
+            Write-Host "Source patch was already committed."
+          }
+
+      - name: Create application archive
+        shell: pwsh
+        run: Compress-Archive -Path publish\* -DestinationPath CareLink6.0.1.6-default-browser-fixed.zip -Force
+
+      - name: Create source archives
+        shell: pwsh
+        run: |
+          git archive --format=zip --output=6.0.1.6-source-default-browser-fixed.zip HEAD
+          git archive --format=tar.gz --output=6.0.1.6-source-default-browser-fixed.tar.gz HEAD
+
+      - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: pwsh
         run: |
-          gh release create 6.0.1.6-default-browser \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "CareLink 6.0.1.6 (Default Browser OAuth)" \
-            --generate-notes \
-            CareLink6.0.1.6.zip \
-            6.0.1.6-source.zip \
-            6.0.1.6-source.tar.gz
+          $tag = "6.0.1.6-default-browser-fixed"
+          gh release delete $tag --repo "$env:GITHUB_REPOSITORY" --yes --cleanup-tag 2>$null
+          gh release create $tag --repo "$env:GITHUB_REPOSITORY" --title "CareLink 6.0.1.6 (Default Browser + Auth0 Fix)" --generate-notes CareLink6.0.1.6-default-browser-fixed.zip 6.0.1.6-source-default-browser-fixed.zip 6.0.1.6-source-default-browser-fixed.tar.gz
