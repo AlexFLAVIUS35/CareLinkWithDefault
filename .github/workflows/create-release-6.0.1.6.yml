@@ -1,0 +1,29 @@
+name: Create CareLink 6.0.1.6 release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download upstream release assets
+        run: |
+          curl -L --fail -o CareLink6.0.1.6.zip https://github.com/paul1956/CareLink/releases/download/6.0.1.6/CareLink6.0.1.6.zip
+          curl -L --fail -o 6.0.1.6-source.zip https://github.com/paul1956/CareLink/archive/refs/tags/6.0.1.6.zip
+          curl -L --fail -o 6.0.1.6-source.tar.gz https://github.com/paul1956/CareLink/archive/refs/tags/6.0.1.6.tar.gz
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create 6.0.1.6-default-browser \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CareLink 6.0.1.6 (Default Browser OAuth)" \
+            --generate-notes \
+            CareLink6.0.1.6.zip \
+            6.0.1.6-source.zip \
+            6.0.1.6-source.tar.gz
