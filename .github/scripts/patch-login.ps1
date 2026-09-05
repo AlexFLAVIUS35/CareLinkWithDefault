@@ -13,6 +13,14 @@ $service = $service.Replace(
     'If String.IsNullOrWhiteSpace(value:=magIdentifier) Then',
     'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
 
+# VB requires explicit continuation for this chained JsonElement access in the current project/toolchain.
+$service = $service.Replace(
+    'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0).`r`n                                                 GetProperty(propertyName:="provider").`r`n                                                 GetProperty(propertyName:="auth_url").GetString()',
+    'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0). _`r`n                                                 GetProperty(propertyName:="provider"). _`r`n                                                 GetProperty(propertyName:="auth_url").GetString()')
+$service = $service.Replace(
+    'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0).' + [Environment]::NewLine + '                                                 GetProperty(propertyName:="provider").' + [Environment]::NewLine + '                                                 GetProperty(propertyName:="auth_url").GetString()',
+    'providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0). _' + [Environment]::NewLine + '                                                 GetProperty(propertyName:="provider"). _' + [Environment]::NewLine + '                                                 GetProperty(propertyName:="auth_url").GetString()')
+
 $stopPattern = "Catch ex As Exception\r?\n\s*Stop"
 $stopReplacement = 'Catch ex As Exception' + [Environment]::NewLine + '                            Throw New ApplicationException(message:=$"Failed to parse CareLink endpoint configuration: {ex.Message}", innerException:=ex)'
 $service = [regex]::Replace($service, $stopPattern, $stopReplacement, 1)
@@ -71,6 +79,7 @@ $service = [regex]::Replace($service, $nonAuthPattern, $nonAuthReplacement, 1)
 
 if ($service -match 'OAuthBrowserForm') { throw 'CareLinkService still references OAuthBrowserForm.' }
 if ($service -notmatch 'DefaultBrowserOAuth\.CaptureRedirectAsync') { throw 'Direct default-browser OAuth was not applied.' }
+if ($service -match 'providersDoc\.RootElement\.GetProperty\(propertyName:="providers"\)\(index:=0\)\.\r?\n') { throw 'Provider JSON chain still lacks explicit line continuation.' }
 Set-Content -Path $servicePath -Value $service -Encoding UTF8
 
 $loginPath = 'src/CareLink/Dialogs/LoginDialog.vb'
