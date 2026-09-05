@@ -2,6 +2,9 @@ name: Fix Auth0 token exchange
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .auth0-patch-trigger
 
 permissions:
   contents: write
