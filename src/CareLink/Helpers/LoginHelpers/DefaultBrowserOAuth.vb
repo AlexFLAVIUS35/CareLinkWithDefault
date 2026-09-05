@@ -30,8 +30,6 @@ Friend Module DefaultBrowserOAuth
 
         Dim expectedPath As String = If(String.IsNullOrEmpty(redirect.AbsolutePath), "/", redirect.AbsolutePath)
 
-        ' Preserve the provider's state value when one was already supplied.
-        ' Otherwise create one so every authorization attempt is bound to this callback.
         Dim expectedState As String = GetQueryParameter(startUrl, "state")
         If String.IsNullOrWhiteSpace(expectedState) Then
             expectedState = Guid.NewGuid().ToString("N")
@@ -127,7 +125,7 @@ Friend Module DefaultBrowserOAuth
         End Using
     End Function
 
-    Private Shared Sub OpenDefaultBrowser(url As String)
+    Private Sub OpenDefaultBrowser(url As String)
         Try
             Dim browserInfo As New ProcessStartInfo With {
                 .FileName = url,
@@ -144,16 +142,16 @@ Friend Module DefaultBrowserOAuth
         End Try
     End Sub
 
-    Private Shared Function AddQueryParameter(url As String, name As String, value As String) As String
+    Private Function AddQueryParameter(url As String, name As String, value As String) As String
         Dim separator As String = If(url.Contains("?"c), "&", "?")
         Return url & separator & Uri.EscapeDataString(name) & "=" & Uri.EscapeDataString(value)
     End Function
 
-    Private Shared Function GetQueryParameter(url As String, name As String) As String
+    Private Function GetQueryParameter(url As String, name As String) As String
         Return GetQueryParameter(New Uri(url, UriKind.Absolute), name)
     End Function
 
-    Private Shared Function GetQueryParameter(uri As Uri, name As String) As String
+    Private Function GetQueryParameter(uri As Uri, name As String) As String
         Dim query As String = uri.Query.TrimStart("?"c)
         If query.Length = 0 Then Return Nothing
 
@@ -170,8 +168,8 @@ Friend Module DefaultBrowserOAuth
         Return Nothing
     End Function
 
-    Private Shared Async Function ReadRequestLineAsync(stream As NetworkStream,
-                                                       cancellationToken As CancellationToken) As Task(Of String)
+    Private Async Function ReadRequestLineAsync(stream As NetworkStream,
+                                                cancellationToken As CancellationToken) As Task(Of String)
         Dim buffer As New List(Of Byte)()
         Dim singleByte(0) As Byte
 
@@ -198,7 +196,7 @@ Friend Module DefaultBrowserOAuth
         Return Encoding.ASCII.GetString(buffer.ToArray()).TrimEnd(ControlChars.Cr, ControlChars.Lf)
     End Function
 
-    Private Shared Function ParseRequestUri(requestLine As String, redirect As Uri) As Uri
+    Private Function ParseRequestUri(requestLine As String, redirect As Uri) As Uri
         Dim parts As String() = requestLine.Split(" "c)
         If parts.Length < 2 OrElse Not parts(0).Equals("GET", StringComparison.OrdinalIgnoreCase) Then
             Throw New InvalidDataException("The OAuth callback was not a valid HTTP GET request.")
@@ -212,10 +210,10 @@ Friend Module DefaultBrowserOAuth
         Return New UriBuilder("http", redirect.Host, redirect.Port, requestTarget).Uri
     End Function
 
-    Private Shared Async Function WriteResponseAsync(stream As NetworkStream,
-                                                     body As String,
-                                                     statusCode As HttpStatusCode,
-                                                     cancellationToken As CancellationToken) As Task
+    Private Async Function WriteResponseAsync(stream As NetworkStream,
+                                              body As String,
+                                              statusCode As HttpStatusCode,
+                                              cancellationToken As CancellationToken) As Task
         Dim bytes As Byte() = Encoding.UTF8.GetBytes(
             $"<html><head><meta charset='utf-8'><title>CareLink</title></head><body>{body}</body></html>")
         Dim header As String =
