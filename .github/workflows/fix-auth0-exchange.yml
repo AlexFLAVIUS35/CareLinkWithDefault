@@ -16,8 +16,9 @@ jobs:
           fetch-depth: 0
 
       - name: Patch Auth0 token exchange
-        shell: python
+        shell: bash
         run: |
+          python3 <<'PY'
           from pathlib import Path
 
           path = Path("src/CareLink/Helpers/LoginHelpers/CareLinkService.vb")
@@ -112,6 +113,7 @@ jobs:
 
           path.write_text(text, encoding="utf-8-sig", newline="\n")
           print("Auth0 token exchange patched successfully.")
+          PY
 
       - name: Verify patch
         shell: bash
