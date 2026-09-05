@@ -30,9 +30,8 @@ Friend Module DefaultBrowserOAuth
 
         Dim expectedPath As String = If(String.IsNullOrEmpty(redirect.AbsolutePath), "/", redirect.AbsolutePath)
 
-        ' Always use one state value for the entire authorization attempt. If the
-        ' authorization URL already contains state (the non-Auth0 flow does), preserve it.
-        ' Otherwise generate one here (the Auth0 flow does not need to supply it itself).
+        ' Preserve the provider's state value when one was already supplied.
+        ' Otherwise create one so every authorization attempt is bound to this callback.
         Dim expectedState As String = GetQueryParameter(startUrl, "state")
         If String.IsNullOrWhiteSpace(expectedState) Then
             expectedState = Guid.NewGuid().ToString("N")
@@ -71,8 +70,7 @@ Friend Module DefaultBrowserOAuth
                             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
                             readTimeout.CancelAfter(TimeSpan.FromSeconds(ClientReadTimeoutSeconds))
 
-                            Dim requestLine As String =
-                                Await ReadRequestLineAsync(stream, readTimeout.Token)
+                            Dim requestLine As String = Await ReadRequestLineAsync(stream, readTimeout.Token)
                             Dim callbackUri As Uri = ParseRequestUri(requestLine, redirect)
 
                             If Not callbackUri.IsLoopback OrElse
