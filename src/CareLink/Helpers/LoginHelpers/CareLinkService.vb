@@ -236,9 +236,9 @@ Public Class CareLinkService
 
                 Using providersDoc As JsonDocument = JsonDocument.Parse(json:=providersJson)
                     Dim captchaUrl As String =
-                        providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0).
-                                                 GetProperty(propertyName:="provider").
-                                                 GetProperty(propertyName:="auth_url").GetString()
+                        providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0) _
+                                                 .GetProperty(propertyName:="provider") _
+                                                 .GetProperty(propertyName:="auth_url").GetString()
 
                     Dim redirectResult As RedirectResult
                     Do
