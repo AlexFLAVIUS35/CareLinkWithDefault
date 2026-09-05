@@ -33,6 +33,100 @@ jobs:
           $service = $service.Replace('Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(30)}', 'Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(15)}')
           $service = $service.Replace('If String.IsNullOrWhiteSpace(value:=magIdentifier) Then', 'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
           $service = $service.Replace('Catch ex As Exception' + [Environment]::NewLine + '                            Stop', 'Catch ex As Exception' + [Environment]::NewLine + '                            Throw New ApplicationException(message:=$"Failed to parse CareLink endpoint configuration: {ex.Message}", innerException:=ex)')
+
+          $oldAuthBrowser = @'
+        ' Ensure the UI dialog and WebView2 initialization run on the UI thread.
+        redirectResult = Await InvokeOnUiThreadAsync(
+           work:=Function()
+                     Do
+                         Using frm As New OAuthBrowserForm(startUrl:=fullUrl,
+                                                           redirectUri,
+                                                           userName,
+                                                           password)
+                             Dim dr As DialogResult = frm.ShowDialog()
+                             If dr = DialogResult.OK Then
+                                 Return frm.Result
+                             ElseIf dr = DialogResult.Retry Then
+                                 ' Caller will recreate the dialog and try again
+                                 Continue Do
+                             Else
+                                 Throw New Exception(message:="Login was cancelled.")
+                             End If
+                         End Using
+                     Loop
+                 End Function)
+'@
+          $newAuthBrowser = @'
+        ' Use the Windows default browser directly. CaptureRedirectAsync owns the
+        ' loopback listener and waits asynchronously, so no modal WinForms dialog
+        ' can block the login continuation.
+        Do
+            Try
+                redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(
+                    startUrl:=fullUrl,
+                    redirectUri:=redirectUri,
+                    cancellationToken:=Threading.CancellationToken.None)
+                Exit Do
+            Catch ex As Exception
+                Dim retryResult As DialogResult = MessageBox.Show(
+                    ex.Message & Environment.NewLine & Environment.NewLine &
+                    "Retry the CareLink login?",
+                    "CareLink Login",
+                    MessageBoxButtons.RetryCancel,
+                    MessageBoxIcon.Error)
+                If retryResult <> DialogResult.Retry Then
+                    Throw New Exception("Login was cancelled.", ex)
+                End If
+            End Try
+        Loop
+'@
+          if ($service.Contains($oldAuthBrowser)) { $service = $service.Replace($oldAuthBrowser, $newAuthBrowser) } else { throw 'Auth0 modal browser block could not be located.' }
+
+          $oldNonAuthBrowser = @'
+                    Dim redirectResult As RedirectResult
+                    Do
+                        Using frm As New OAuthBrowserForm(startUrl:=captchaUrl,
+                            redirectUri:=redirectUri,
+                            userName:=userName,
+                            password:=password)
+                            Dim dr As DialogResult = frm.ShowDialog()
+                            If dr = DialogResult.OK Then
+                                redirectResult = frm.Result
+                                Exit Do
+                            ElseIf dr = DialogResult.Retry Then
+                                Continue Do
+                            Else
+                                Throw New Exception(message:="Login was cancelled.")
+                            End If
+                        End Using
+                    Loop
+'@
+          $newNonAuthBrowser = @'
+                    Dim redirectResult As RedirectResult
+                    Do
+                        Try
+                            redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(
+                                startUrl:=captchaUrl,
+                                redirectUri:=redirectUri,
+                                cancellationToken:=Threading.CancellationToken.None)
+                            Exit Do
+                        Catch ex As Exception
+                            Dim retryResult As DialogResult = MessageBox.Show(
+                                ex.Message & Environment.NewLine & Environment.NewLine &
+                                "Retry the CareLink login?",
+                                "CareLink Login",
+                                MessageBoxButtons.RetryCancel,
+                                MessageBoxIcon.Error)
+                            If retryResult <> DialogResult.Retry Then
+                                Throw New Exception("Login was cancelled.", ex)
+                            End If
+                        End Try
+                    Loop
+'@
+          if ($service.Contains($oldNonAuthBrowser)) { $service = $service.Replace($oldNonAuthBrowser, $newNonAuthBrowser) } else { throw 'Non-Auth0 modal browser block could not be located.' }
+
+          if ($service -match 'OAuthBrowserForm') { throw 'CareLinkService still references OAuthBrowserForm.' }
+          if ($service -notmatch 'DefaultBrowserOAuth\.CaptureRedirectAsync') { throw 'Direct default-browser OAuth was not applied.' }
           if ($service -notmatch 'TimeSpan\.FromSeconds\(15\)') { throw 'HTTP timeout fix could not be verified.' }
           if ($service -notmatch 'If Not String\.IsNullOrWhiteSpace\(value:=magIdentifier\) Then') { throw 'mag-identifier header fix could not be verified.' }
           if ($service -match 'Catch ex As Exception\r?\n\s+Stop') { throw 'A discovery exception handler still contains Stop.' }
@@ -98,7 +192,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/CareLink/Helpers/LoginHelpers/CareLinkService.vb src/CareLink/Dialogs/LoginDialog.vb
-          if (-not (git diff --cached --quiet)) { git commit -m 'Fix CareLink discovery login hang'; git push } else { Write-Host 'Login source patch was already committed.' }
+          if (-not (git diff --cached --quiet)) { git commit -m 'Fix CareLink browser login deadlock'; git push } else { Write-Host 'Login source patch was already committed.' }
 
       - name: Create application archive
         shell: pwsh
