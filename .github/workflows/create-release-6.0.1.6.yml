@@ -29,18 +29,46 @@ jobs:
         run: |
           $servicePath = "src/CareLink/Helpers/LoginHelpers/CareLinkService.vb"
           $service = Get-Content -Raw -Encoding UTF8 $servicePath
-          $service = $service.Replace('Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(120)}', 'Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(30)}')
+          $service = $service.Replace('Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(120)}', 'Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(15)}')
+          $service = $service.Replace('Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(30)}', 'Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(15)}')
+          $service = $service.Replace('Public Const KeySizeInBits As Integer = 2048', 'Public Const KeySizeInBits As Integer = 2048' + [Environment]::NewLine + [Environment]::NewLine + '    Shared Sub New()' + [Environment]::NewLine + '        s_http.DefaultRequestHeaders.Accept.ParseAdd("application/json")' + [Environment]::NewLine + '        s_http.DefaultRequestHeaders.UserAgent.ParseAdd("Dalvik/2.1.0 (Linux; U; Android 10; Nexus 5X Build/QQ3A.200805.001)")' + [Environment]::NewLine + '    End Sub')
           $service = $service.Replace('If String.IsNullOrWhiteSpace(value:=magIdentifier) Then', 'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
           $service = $service.Replace('Catch ex As Exception' + [Environment]::NewLine + '                            Stop', 'Catch ex As Exception' + [Environment]::NewLine + '                            Throw New ApplicationException(message:=$"Failed to parse CareLink endpoint configuration: {ex.Message}", innerException:=ex)')
-          if ($service -notmatch 'TimeSpan\.FromSeconds\(30\)') {
-            throw 'HTTP timeout fix could not be verified.'
+          $service = $service.Replace('$"{EscapeKVP(Name:="redirect_uri", value:=redirectUri)}&" &' + [Environment]::NewLine + '            $"{EscapeKVP(Name:="audience", value:=audience)}"', '$"{EscapeKVP(Name:="redirect_uri", value:=redirectUri)}&" &' + [Environment]::NewLine + '            $"state={EscapeKVP(Name:="state", value:=RandomB64String(length:=22))}&" &' + [Environment]::NewLine + '            $"{EscapeKVP(Name:="audience", value:=audience)}"')
+          $helper = @'
+    Private Shared Async Function GetDiscoveryTextAsync(requestUri As String) As Task(Of String)
+        If String.IsNullOrWhiteSpace(requestUri) Then
+            Throw New ArgumentException(message:="Discovery URL is empty.", paramName:=NameOf(requestUri))
+        End If
+
+        Using request As New HttpRequestMessage(method:=HttpMethod.Get, requestUri:=requestUri)
+            request.Headers.Accept.ParseAdd("application/json")
+            request.Headers.UserAgent.ParseAdd("Dalvik/2.1.0 (Linux; U; Android 10; Nexus 5X Build/QQ3A.200805.001)")
+            Using response As HttpResponseMessage = Await s_http.SendAsync(request:=request, completionOption:=HttpCompletionOption.ResponseHeadersRead)
+                Dim body As String = Await response.Content.ReadAsStringAsync()
+                If Not response.IsSuccessStatusCode Then
+                    Throw New HttpRequestException(message:=$"CareLink discovery returned HTTP {CInt(response.StatusCode)} ({response.StatusCode}).")
+                End If
+                If String.IsNullOrWhiteSpace(body) Then
+                    Throw New ApplicationException(message:="CareLink discovery returned an empty response.")
+                End If
+                Return body
+            End Using
+        End Using
+    End Function
+
+'@
+          if ($service -notmatch 'Private Shared Async Function GetDiscoveryTextAsync\(') {
+            $marker = '    Public Shared Async Function ResolveEndpointConfigAsync(discoveryUrl As String, serverRegion As Region) As Task(Of EndpointConfig)'
+            if ($service -notmatch [regex]::Escape($marker)) { throw 'ResolveEndpointConfigAsync marker not found.' }
+            $service = $service.Replace($marker, $helper + [Environment]::NewLine + $marker)
           }
-          if ($service -notmatch 'If Not String\.IsNullOrWhiteSpace\(value:=magIdentifier\) Then') {
-            throw 'mag-identifier header fix could not be verified.'
-          }
-          if ($service -match 'Catch ex As Exception\r?\n\s+Stop') {
-            throw 'A discovery exception handler still contains Stop.'
-          }
+          $service = $service.Replace('Await s_http.GetStringAsync(requestUri:=discoveryUrl)', 'Await GetDiscoveryTextAsync(requestUri:=discoveryUrl)')
+          $service = $service.Replace('Await s_http.GetStringAsync(requestUri:=ssoUrl)', 'Await GetDiscoveryTextAsync(requestUri:=ssoUrl)')
+          if ($service -notmatch 'TimeSpan\.FromSeconds\(15\)') { throw 'Discovery timeout fix could not be verified.' }
+          if ($service -notmatch 'GetDiscoveryTextAsync') { throw 'Discovery request helper could not be verified.' }
+          if ($service -match 'ResolveEndpointConfigAsync[\s\S]*Catch ex As Exception\r?\n\s+Stop') { throw 'Discovery parsing still contains Stop.' }
+          if ($service -notmatch 'If Not String\.IsNullOrWhiteSpace\(value:=magIdentifier\) Then') { throw 'mag-identifier header fix could not be verified.' }
           Set-Content -Path $servicePath -Value $service -Encoding UTF8
 
           $loginPath = "src/CareLink/Dialogs/LoginDialog.vb"
@@ -58,17 +86,11 @@ jobs:
                 '            Me.Ok_Button.Enabled = True' + $nl +
                 '            Me.Cancel_Button.Enabled = True'
             $patchedLogin = [regex]::Replace($login, $catchPattern, $catchReplacement, 1)
-            if ($patchedLogin -eq $login) {
-              throw 'LoginDialog exception handler could not be located.'
-            }
+            if ($patchedLogin -eq $login) { throw 'LoginDialog exception handler could not be located.' }
             $login = $patchedLogin
           }
-          if ($login -match 'Catch ex As Exception\r?\n\s+Stop\r?\n\s+Finally') {
-            throw 'LoginDialog exception handler still contains Stop.'
-          }
-          if ($login -notmatch [regex]::Escape($newCatchMarker)) {
-            throw 'LoginDialog exception handler fix could not be verified.'
-          }
+          if ($login -match 'Catch ex As Exception\r?\n\s+Stop\r?\n\s+Finally') { throw 'LoginDialog exception handler still contains Stop.' }
+          if ($login -notmatch [regex]::Escape($newCatchMarker)) { throw 'LoginDialog exception handler fix could not be verified.' }
           Set-Content -Path $loginPath -Value $login -Encoding UTF8
           Write-Host 'Login source hardening applied and verified.'
 
@@ -90,15 +112,12 @@ jobs:
           New-Item -ItemType Directory -Path $target -Force | Out-Null
           Copy-Item 'C:\Windows\Media\Alarm01.wav' "$target\Alarm01.wav" -Force
           Copy-Item 'C:\Windows\Media\Alarm02.wav' "$target\Alarm02.wav" -Force
-          if (-not (Test-Path "$target\Alarm01.wav") -or -not (Test-Path "$target\Alarm02.wav")) {
-            throw 'Could not prepare Windows alarm resources.'
-          }
+          if (-not (Test-Path "$target\Alarm01.wav") -or -not (Test-Path "$target\Alarm02.wav")) { throw 'Could not prepare Windows alarm resources.' }
           Write-Host 'Windows alarm resources prepared for MSBuild.'
 
       - name: Build and publish Windows app
         shell: pwsh
-        run: |
-          .\.dotnet\dotnet.exe publish src\CareLink\CareLink.vbproj -c Release -r win-x64 --self-contained false -o publish
+        run: .\.dotnet\dotnet.exe publish src\CareLink\CareLink.vbproj -c Release -r win-x64 --self-contained false -o publish
 
       - name: Commit source patch
         shell: pwsh
@@ -107,7 +126,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/CareLink/Helpers/LoginHelpers/CareLinkService.vb src/CareLink/Dialogs/LoginDialog.vb
           if (-not (git diff --cached --quiet)) {
-            git commit -m "Fix CareLink discovery login hang"
+            git commit -m "Harden CareLink discovery requests"
             git push
           } else {
             Write-Host "Login source patch was already committed."
