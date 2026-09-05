@@ -36,27 +36,9 @@ jobs:
           }
 
           $pattern = '(?s)        Dim form As New List\(Of KeyValuePair\(Of String, String\)\) From \{.*?        Dim body As String = Await response\.Content\.ReadAsStringAsync\(\)'
-          $replacement = @'
-        Dim form As New List(Of KeyValuePair(Of String, String)) From {
-            New KeyValuePair(Of String, String)(key:="grant_type", value:="authorization_code"),
-            New KeyValuePair(Of String, String)(key:="client_id", value:=clientId),
-            New KeyValuePair(Of String, String)(key:="code", value:=redirectResult.Code),
-            New KeyValuePair(Of String, String)(key:="redirect_uri", value:=redirectUri)}
-
-        If Not String.IsNullOrWhiteSpace(clientSecret) Then
-            form.Add(New KeyValuePair(Of String, String)(key:="client_secret", value:=clientSecret))
-        End If
-
-        Using content As New FormUrlEncodedContent(nameValueCollection:=form)
-            Using request As New HttpRequestMessage(method:=HttpMethod.Post, requestUri:=tokenUrl)
-                request.Headers.Accept.Add(New System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"))
-                request.Headers.UserAgent.ParseAdd("CareLink/6.0.1.6")
-                request.Content = content
-
-                Dim response As HttpResponseMessage = Await s_http.SendAsync(request)
-                Dim body As String = Await response.Content.ReadAsStringAsync()
-'@
+          $replacement = "        Dim form As New List(Of KeyValuePair(Of String, String)) From {`r`n            New KeyValuePair(Of String, String)(key:=\"grant_type\", value:=\"authorization_code\"),`r`n            New KeyValuePair(Of String, String)(key:=\"client_id\", value:=clientId),`r`n            New KeyValuePair(Of String, String)(key:=\"code\", value:=redirectResult.Code),`r`n            New KeyValuePair(Of String, String)(key:=\"redirect_uri\", value:=redirectUri)}`r`n`r`n        If Not String.IsNullOrWhiteSpace(clientSecret) Then`r`n            form.Add(New KeyValuePair(Of String, String)(key:=\"client_secret\", value:=clientSecret))`r`n        End If`r`n`r`n        Using content As New FormUrlEncodedContent(nameValueCollection:=form)`r`n            Using request As New HttpRequestMessage(method:=HttpMethod.Post, requestUri:=tokenUrl)`r`n                request.Headers.Accept.Add(New System.Net.Http.Headers.MediaTypeWithQualityHeaderValue(\"application/json\"))`r`n                request.Headers.UserAgent.ParseAdd(\"CareLink/6.0.1.6\")`r`n                request.Content = content`r`n`r`n                Dim response As HttpResponseMessage = Await s_http.SendAsync(request)`r`n                Dim body As String = Await response.Content.ReadAsStringAsync()"
           $updated = [regex]::Replace($text, $pattern, $replacement, 1)
+
           if ($updated -eq $text) {
             if ($text -match 'client_secret' -and $text -match 'CareLink/6\.0\.1\.6') {
               Write-Host "Auth0 exchange already patched."
