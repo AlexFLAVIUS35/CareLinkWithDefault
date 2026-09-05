@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - .auth0-patch-trigger
+      - '.auth0-patch-trigger'
 
 permissions:
   contents: write
@@ -21,28 +21,22 @@ jobs:
       - name: Patch Auth0 token exchange
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("src/CareLink/Helpers/LoginHelpers/CareLinkService.vb")
-          text = path.read_text(encoding="utf-8-sig")
-
-          if "client_secret" in text and "CareLink/6.0.1.6" in text:
+          python3 -c 'from pathlib import Path
+          p = Path("src/CareLink/Helpers/LoginHelpers/CareLinkService.vb")
+          s = p.read_text(encoding="utf-8-sig")
+          if "client_secret" in s and "CareLink/6.0.1.6" in s:
               print("Auth0 exchange is already patched.")
               raise SystemExit(0)
-
-          old = """        Dim clientId As String = client.ClientId
+          a = """        Dim clientId As String = client.ClientId
         Dim scope As String = client.Scope
 """
-          new = """        Dim clientId As String = client.ClientId
+          b = """        Dim clientId As String = client.ClientId
         Dim clientSecret As String = client.ClientSecret
         Dim scope As String = client.Scope
 """
-          if old not in text:
-              raise SystemExit("Could not find Auth0 client configuration block.")
-          text = text.replace(old, new, 1)
-
-          old = """        Dim form As New List(Of KeyValuePair(Of String, String)) From {
+          if a not in s: raise SystemExit("Could not find Auth0 client configuration block.")
+          s = s.replace(a, b, 1)
+          a = """        Dim form As New List(Of KeyValuePair(Of String, String)) From {
             New KeyValuePair(Of String, String)(key:="grant_type", value:="authorization_code"),
             New KeyValuePair(Of String, String)(key:="client_id", value:=clientId),
             New KeyValuePair(Of String, String)(key:="code", value:=redirectResult.Code),
@@ -51,7 +45,7 @@ jobs:
         Dim content As New FormUrlEncodedContent(nameValueCollection:=form)
         Dim response As HttpResponseMessage = Await s_http.PostAsync(requestUri:=tokenUrl, content)
 """
-          new = """        Dim form As New List(Of KeyValuePair(Of String, String)) From {
+          b = """        Dim form As New List(Of KeyValuePair(Of String, String)) From {
             New KeyValuePair(Of String, String)(key:="grant_type", value:="authorization_code"),
             New KeyValuePair(Of String, String)(key:="client_id", value:=clientId),
             New KeyValuePair(Of String, String)(key:="code", value:=redirectResult.Code),
@@ -68,29 +62,25 @@ jobs:
                 request.Content = content
                 Dim response As HttpResponseMessage = Await s_http.SendAsync(request)
 """
-          if old not in text:
-              raise SystemExit("Could not find Auth0 token request block.")
-          text = text.replace(old, new, 1)
-
-          old = """        If Not response.IsSuccessStatusCode Then
+          if a not in s: raise SystemExit("Could not find Auth0 token request block.")
+          s = s.replace(a, b, 1)
+          a = """        If Not response.IsSuccessStatusCode Then
             message = $"Could not get token data in {NameOf(DoLoginAuth0Async)}: {body}"
             Throw New Exception(message)
         End If
 
         Dim token As TokenData = Nothing
 """
-          new = """                If Not response.IsSuccessStatusCode Then
+          b = """                If Not response.IsSuccessStatusCode Then
                     message = $"Could not get token data in {NameOf(DoLoginAuth0Async)}: {body}"
                     Throw New Exception(message)
                 End If
 
                 Dim token As TokenData = Nothing
 """
-          if old not in text:
-              raise SystemExit("Could not find Auth0 response block.")
-          text = text.replace(old, new, 1)
-
-          old = """        If Not body.TryFromJson(result:=token) Then
+          if a not in s: raise SystemExit("Could not find Auth0 response block.")
+          s = s.replace(a, b, 1)
+          a = """        If Not body.TryFromJson(result:=token) Then
             message = "Failed to parse token response JSON."
             Throw New ApplicationException(message)
         End If
@@ -99,7 +89,7 @@ jobs:
         Return token
     End Function
 """
-          new = """                If Not body.TryFromJson(result:=token) Then
+          b = """                If Not body.TryFromJson(result:=token) Then
                     message = "Failed to parse token response JSON."
                     Throw New ApplicationException(message)
                 End If
@@ -110,13 +100,10 @@ jobs:
         End Using
     End Function
 """
-          if old not in text:
-              raise SystemExit("Could not find Auth0 method ending.")
-          text = text.replace(old, new, 1)
-
-          path.write_text(text, encoding="utf-8-sig", newline="\n")
-          print("Auth0 token exchange patched successfully.")
-          PY
+          if a not in s: raise SystemExit("Could not find Auth0 method ending.")
+          s = s.replace(a, b, 1)
+          p.write_text(s, encoding="utf-8-sig", newline="\n")
+          print("Auth0 token exchange patched successfully.")'
 
       - name: Verify patch
         shell: bash
