@@ -319,7 +319,7 @@ Public Class CareLinkService
                         {"grant_type", idTokenType}})
 
                     Dim tokenRequest As New HttpRequestMessage(method:=HttpMethod.Post, requestUri:=tokenUrl)
-                    If String.IsNullOrWhiteSpace(value:=magIdentifier) Then
+                    If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then
                         tokenRequest.Headers.Add(name:="mag-identifier", value:=magIdentifier)
                     End If
 
@@ -524,4 +524,5 @@ Public Class CareLinkService
     End Function
 
 End Class
+
 

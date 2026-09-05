@@ -1,4 +1,4 @@
-﻿' Licensed to the .NET Foundation under one or more agreements.
+' Licensed to the .NET Foundation under one or more agreements.
 ' The .NET Foundation licenses this file to you under the MIT license.
 ' See the LICENSE file in the project root for more information.
 
@@ -250,7 +250,7 @@ Public Class LoginDialog
         s_password = Me.PasswordTextBox.Text
         s_countryCode = Me.CountryComboBox.SelectedValue.ToString
         Try
-            Me.LoginStatus.Text = "Checking token file..."
+            Me.LoginStatus.Text = "Checking CareLink connection..."
             Dim lastErrorMsg As String
             Dim discovertTupleStatusCode As HttpStatusCode = HttpStatusCode.OK
             Dim discoveryResult As DiscoveryRecord = Await GetDiscoveryDataAsync()
@@ -371,7 +371,9 @@ Public Class LoginDialog
                 End Select
             End If
         Catch ex As Exception
-            Stop
+            Dim errorMessage As String = If(String.IsNullOrWhiteSpace(ex.Message), "The login operation failed.", ex.Message)
+            ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))
+            MessageBox.Show(Me, errorMessage, "CareLink Login", MessageBoxButtons.OK, MessageBoxIcon.Error)
         Finally
             Me.Ok_Button.Enabled = True
             Me.Cancel_Button.Enabled = True
@@ -558,3 +560,4 @@ Public Class LoginDialog
     End Function
 
 End Class
+
