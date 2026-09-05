@@ -256,7 +256,7 @@ Public Class LoginDialog
             Dim discovertTupleStatusCode As HttpStatusCode = HttpStatusCode.OK
                         Me.LoginStatus.Text = "Loading CareLink discovery configuration..."
             Me.Refresh()
-            Dim discoveryTask As Task(Of DiscoveryRecord) = GetDiscoveryDataAsync()
+            Dim discoveryTask As Task(Of DiscoveryRecord) = Task.Run(Function() GetDiscoveryDataAsync())
             Dim discoveryCompleted As Task = Await Task.WhenAny(discoveryTask, Task.Delay(TimeSpan.FromSeconds(20)))
             If Not Object.ReferenceEquals(discoveryCompleted, discoveryTask) Then
                 Throw New TimeoutException("CareLink discovery timed out after 20 seconds. Check your internet connection and try again.")
@@ -266,6 +266,7 @@ Public Class LoginDialog
             lastErrorMsg = discoveryResult.lastErrorMsg
             discovertTupleStatusCode = discoveryResult.httpStatusCode
             If Me.ClientDiscover IsNot Nothing Then
+                Me.LoginStatus.Text = "Opening CareLink login..."
                 Me.LoginStatus.Text = "Opening CareLink login..."
                 Me.Ok_Button.Enabled = False
                 Application.DoEvents()
@@ -569,6 +570,7 @@ Public Class LoginDialog
     End Function
 
 End Class
+
 
 
 
