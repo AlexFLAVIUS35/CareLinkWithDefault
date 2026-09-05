@@ -30,8 +30,9 @@ Public Class OAuthBrowserForm
 
     Private Async Sub OAuthBrowserForm_Load(sender As Object, e As EventArgs) Handles MyBase.Load
         Try
-            ' The login page is opened by Windows using the user's default browser.
-            ' DefaultBrowserOAuth listens for the registered loopback OAuth callback.
+            ' The actual login page is opened by Windows using the user's default browser.
+            ' This form only owns the local OAuth callback and keeps the existing login
+            ' workflow compatible with the caller's retry/cancel handling.
             Result = Await DefaultBrowserOAuth.CaptureRedirectAsync(_startUrl,
                                                                     _redirectUri,
                                                                     _cancellation.Token)
@@ -41,15 +42,25 @@ Public Class OAuthBrowserForm
             DialogResult = DialogResult.Cancel
             Close()
         Catch ex As Exception
-            If Not IsDisposed Then
-                MessageBox.Show(Me,
-                                ex.Message,
-                                "CareLink Login",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Error)
-                DialogResult = DialogResult.Cancel
-                Close()
+            If IsDisposed Then
+                Return
             End If
+
+            Dim retryResult As DialogResult = MessageBox.Show(
+                Me,
+                ex.Message & Environment.NewLine & Environment.NewLine &
+                "Retry the CareLink login?",
+                "CareLink Login",
+                MessageBoxButtons.RetryCancel,
+                MessageBoxIcon.Error)
+
+            If retryResult = DialogResult.Retry Then
+                Result = Nothing
+                DialogResult = DialogResult.Retry
+            Else
+                DialogResult = DialogResult.Cancel
+            End If
+            Close()
         End Try
     End Sub
 
