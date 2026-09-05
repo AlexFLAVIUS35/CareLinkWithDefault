@@ -1,4 +1,4 @@
-﻿' Licensed to the .NET Foundation under one or more agreements.
+' Licensed to the .NET Foundation under one or more agreements.
 ' The .NET Foundation licenses this file to you under the MIT license.
 ' See the LICENSE file in the project root for more information.
 
@@ -53,6 +53,7 @@ Public Class CareLinkService
         End If
         Dim client As Client = ssoConfig.Client
         Dim clientId As String = client.ClientId
+        Dim clientSecret As String = client.ClientSecret
         Dim scope As String = client.Scope
         Dim redirectUri As String = client.RedirectUri
         Dim audience As String = client.Audience
@@ -103,9 +104,23 @@ Public Class CareLinkService
             New KeyValuePair(Of String, String)(key:="code", value:=redirectResult.Code),
             New KeyValuePair(Of String, String)(key:="redirect_uri", value:=redirectUri)}
 
-        Dim content As New FormUrlEncodedContent(nameValueCollection:=form)
-        Dim response As HttpResponseMessage = Await s_http.PostAsync(requestUri:=tokenUrl, content)
-        Dim body As String = Await response.Content.ReadAsStringAsync()
+        If Not String.IsNullOrWhiteSpace(clientSecret) Then
+            form.Add(New KeyValuePair(Of String, String)(key:="client_secret", value:=clientSecret))
+        End If
+
+        Dim response As HttpResponseMessage = Nothing
+        Dim body As String = Nothing
+
+        Using content As New FormUrlEncodedContent(nameValueCollection:=form)
+            Using request As New HttpRequestMessage(method:=HttpMethod.Post, requestUri:=tokenUrl)
+                request.Headers.Accept.Add(New System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"))
+                request.Headers.UserAgent.ParseAdd("CareLink/6.0.1.6")
+                request.Content = content
+
+                response = Await s_http.SendAsync(request)
+                body = Await response.Content.ReadAsStringAsync()
+            End Using
+        End Using
 
         If Not response.IsSuccessStatusCode Then
             message = $"Could not get token data in {NameOf(DoLoginAuth0Async)}: {body}"
@@ -509,3 +524,4 @@ Public Class CareLinkService
     End Function
 
 End Class
+
