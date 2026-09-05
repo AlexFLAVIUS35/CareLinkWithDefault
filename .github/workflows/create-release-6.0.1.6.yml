@@ -9,6 +9,7 @@ on:
       - src/CareLink/Helpers/LoginHelpers/CareLinkService.vb
       - src/CareLink/Helpers/LoginHelpers/OAuthBrowserForm.vb
       - src/CareLink/Helpers/LoginHelpers/DefaultBrowserOAuth.vb
+      - src/CareLink/Dialogs/LoginDialog.vb
       - .github/workflows/create-release-6.0.1.6.yml
 
 permissions:
@@ -23,63 +24,44 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch Auth0 token exchange
+      - name: Patch and verify login source
         shell: pwsh
         run: |
-          $path = "src/CareLink/Helpers/LoginHelpers/CareLinkService.vb"
-          $text = Get-Content -Raw -Encoding UTF8 $path
+          $servicePath = "src/CareLink/Helpers/LoginHelpers/CareLinkService.vb"
+          $service = Get-Content -Raw -Encoding UTF8 $servicePath
 
-          if ($text -notmatch 'Dim clientSecret As String = client\.ClientSecret') {
-            $old = 'Dim clientId As String = client.ClientId\r?\n        Dim scope As String = client.Scope'
-            $new = "Dim clientId As String = client.ClientId`r`n        Dim clientSecret As String = client.ClientSecret`r`n        Dim scope As String = client.Scope"
-            $text = [regex]::Replace($text, $old, $new, 1)
+          $service = $service.Replace(
+            'If String.IsNullOrWhiteSpace(value:=magIdentifier) Then',
+            'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
+
+          if ($service -notmatch 'If Not String\.IsNullOrWhiteSpace\(value:=magIdentifier\) Then') {
+            throw 'mag-identifier header fix could not be verified.'
           }
 
-          $pattern = '(?s)        Dim form As New List\(Of KeyValuePair\(Of String, String\)\) From \{.*?        Dim body As String = Await response\.Content\.ReadAsStringAsync\(\)'
-          $replacementLines = @(
-            '        Dim form As New List(Of KeyValuePair(Of String, String)) From {'
-            '            New KeyValuePair(Of String, String)(key:="grant_type", value:="authorization_code"),'
-            '            New KeyValuePair(Of String, String)(key:="client_id", value:=clientId),'
-            '            New KeyValuePair(Of String, String)(key:="code", value:=redirectResult.Code),'
-            '            New KeyValuePair(Of String, String)(key:="redirect_uri", value:=redirectUri)}'
-            ''
-            '        If Not String.IsNullOrWhiteSpace(clientSecret) Then'
-            '            form.Add(New KeyValuePair(Of String, String)(key:="client_secret", value:=clientSecret))'
-            '        End If'
-            ''
-            '        Dim response As HttpResponseMessage = Nothing'
-            '        Dim body As String = Nothing'
-            ''
-            '        Using content As New FormUrlEncodedContent(nameValueCollection:=form)'
-            '            Using request As New HttpRequestMessage(method:=HttpMethod.Post, requestUri:=tokenUrl)'
-            '                request.Headers.Accept.Add(New System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"))'
-            '                request.Headers.UserAgent.ParseAdd("CareLink/6.0.1.6")'
-            '                request.Content = content'
-            ''
-            '                response = Await s_http.SendAsync(request)'
-            '                body = Await response.Content.ReadAsStringAsync()'
-            '            End Using'
-            '        End Using'
-          )
-          $replacement = $replacementLines -join "`r`n"
-          $updated = [regex]::Replace($text, $pattern, $replacement, 1)
+          Set-Content -Path $servicePath -Value $service -Encoding UTF8
 
-          if ($updated -eq $text) {
-            if ($text -match 'client_secret' -and $text -match 'CareLink/6\.0\.1\.6') {
-              Write-Host "Auth0 exchange already patched."
-            } else {
-              throw "Could not locate the Auth0 token request block."
-            }
-          } else {
-            $text = $updated
+          $loginPath = "src/CareLink/Dialogs/LoginDialog.vb"
+          $login = Get-Content -Raw -Encoding UTF8 $loginPath
+          $login = $login.Replace('Me.LoginStatus.Text = "Checking token file..."', 'Me.LoginStatus.Text = "Checking CareLink connection..."')
+
+          $catchPattern = '(?s)Catch ex As Exception\r?\n            Stop\r?\n        Finally\r?\n            Me\.Ok_Button\.Enabled = True\r?\n            Me\.Cancel_Button\.Enabled = True'
+          $catchReplacement = @'
+Catch ex As Exception
+            Dim errorMessage As String = If(String.IsNullOrWhiteSpace(ex.Message), "The login operation failed.", ex.Message)
+            ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))
+            Me.Ok_Button.Enabled = True
+            Me.Cancel_Button.Enabled = True
+            MessageBox.Show(Me, errorMessage, "CareLink Login", MessageBoxButtons.OK, MessageBoxIcon.Error)
+        Finally
+            Me.Ok_Button.Enabled = True
+            Me.Cancel_Button.Enabled = True
+'@
+          $patchedLogin = [regex]::Replace($login, $catchPattern, $catchReplacement, 1)
+          if ($patchedLogin -eq $login) {
+            throw 'LoginDialog exception handler could not be located.'
           }
-
-          if ($text -notmatch 'client_secret' -or $text -notmatch 'CareLink/6\.0\.1\.6') {
-            throw "Auth0 patch verification failed."
-          }
-
-          Set-Content -Path $path -Value $text -Encoding UTF8
-          Write-Host "Auth0 token exchange patched."
+          Set-Content -Path $loginPath -Value $patchedLogin -Encoding UTF8
+          Write-Host 'Login source hardening applied and verified.'
 
       - name: Install .NET 11 preview SDK
         shell: pwsh
@@ -114,12 +96,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/CareLink/Helpers/LoginHelpers/CareLinkService.vb
+          git add src/CareLink/Helpers/LoginHelpers/CareLinkService.vb src/CareLink/Dialogs/LoginDialog.vb
           if (-not (git diff --cached --quiet)) {
-            git commit -m "Fix Auth0 token exchange request"
+            git commit -m "Harden CareLink login error handling"
             git push
           } else {
-            Write-Host "Source patch was already committed."
+            Write-Host "Login source patch was already committed."
           }
 
       - name: Create application archive
