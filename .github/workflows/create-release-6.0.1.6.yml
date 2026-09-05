@@ -46,20 +46,30 @@ jobs:
           $loginPath = "src/CareLink/Dialogs/LoginDialog.vb"
           $login = Get-Content -Raw -Encoding UTF8 $loginPath
           $login = $login.Replace('Me.LoginStatus.Text = "Checking token file..."', 'Me.LoginStatus.Text = "Checking CareLink connection..."')
-          $catchPattern = '(?s)Catch ex As Exception\r?\n            Stop\r?\n        Finally\r?\n            Me\.Ok_Button\.Enabled = True\r?\n            Me\.Cancel_Button\.Enabled = True'
-          $nl = [Environment]::NewLine
-          $catchReplacement = 'Catch ex As Exception' + $nl +
-              '            Dim errorMessage As String = If(String.IsNullOrWhiteSpace(ex.Message), "The login operation failed.", ex.Message)' + $nl +
-              '            ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))' + $nl +
-              '            MessageBox.Show(Me, errorMessage, "CareLink Login", MessageBoxButtons.OK, MessageBoxIcon.Error)' + $nl +
-              '        Finally' + $nl +
-              '            Me.Ok_Button.Enabled = True' + $nl +
-              '            Me.Cancel_Button.Enabled = True'
-          $patchedLogin = [regex]::Replace($login, $catchPattern, $catchReplacement, 1)
-          if ($patchedLogin -eq $login) {
-            throw 'LoginDialog exception handler could not be located.'
+          $newCatchMarker = 'ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))'
+          if ($login -notmatch [regex]::Escape($newCatchMarker)) {
+            $catchPattern = '(?s)Catch ex As Exception\r?\n            Stop\r?\n        Finally\r?\n            Me\.Ok_Button\.Enabled = True\r?\n            Me\.Cancel_Button\.Enabled = True'
+            $nl = [Environment]::NewLine
+            $catchReplacement = 'Catch ex As Exception' + $nl +
+                '            Dim errorMessage As String = If(String.IsNullOrWhiteSpace(ex.Message), "The login operation failed.", ex.Message)' + $nl +
+                '            ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))' + $nl +
+                '            MessageBox.Show(Me, errorMessage, "CareLink Login", MessageBoxButtons.OK, MessageBoxIcon.Error)' + $nl +
+                '        Finally' + $nl +
+                '            Me.Ok_Button.Enabled = True' + $nl +
+                '            Me.Cancel_Button.Enabled = True'
+            $patchedLogin = [regex]::Replace($login, $catchPattern, $catchReplacement, 1)
+            if ($patchedLogin -eq $login) {
+              throw 'LoginDialog exception handler could not be located.'
+            }
+            $login = $patchedLogin
           }
-          Set-Content -Path $loginPath -Value $patchedLogin -Encoding UTF8
+          if ($login -match 'Catch ex As Exception\r?\n\s+Stop\r?\n\s+Finally') {
+            throw 'LoginDialog exception handler still contains Stop.'
+          }
+          if ($login -notmatch [regex]::Escape($newCatchMarker)) {
+            throw 'LoginDialog exception handler fix could not be verified.'
+          }
+          Set-Content -Path $loginPath -Value $login -Encoding UTF8
           Write-Host 'Login source hardening applied and verified.'
 
       - name: Install .NET 11 preview SDK
