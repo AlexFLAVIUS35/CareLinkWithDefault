@@ -33,45 +33,9 @@ jobs:
           $service = $service.Replace('Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(30)}', 'Private Shared ReadOnly s_http As New HttpClient With {.Timeout = TimeSpan.FromSeconds(15)}')
           $service = $service.Replace('If String.IsNullOrWhiteSpace(value:=magIdentifier) Then', 'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
           $service = $service.Replace('Catch ex As Exception' + [Environment]::NewLine + '                            Stop', 'Catch ex As Exception' + [Environment]::NewLine + '                            Throw New ApplicationException(message:=$"Failed to parse CareLink endpoint configuration: {ex.Message}", innerException:=ex)')
-
           if ($service -notmatch 'TimeSpan\.FromSeconds\(15\)') { throw 'HTTP timeout fix could not be verified.' }
           if ($service -notmatch 'If Not String\.IsNullOrWhiteSpace\(value:=magIdentifier\) Then') { throw 'mag-identifier header fix could not be verified.' }
           if ($service -match 'Catch ex As Exception\r?\n\s+Stop') { throw 'A discovery exception handler still contains Stop.' }
-
-          if ($service -notmatch 'GetDiscoveryTextAsync') {
-            $marker = '    Public Shared Async Function ResolveEndpointConfigAsync(discoveryUrl As String, serverRegion As Region) As Task(Of EndpointConfig)'
-            $helper = @'
-    Private Shared Async Function GetDiscoveryTextAsync(requestUri As String) As Task(Of String)
-        If String.IsNullOrWhiteSpace(requestUri) Then
-            Throw New ArgumentException(message:="CareLink discovery URL is empty.", paramName:=NameOf(requestUri))
-        End If
-
-        Using request As New HttpRequestMessage(method:=HttpMethod.Get, requestUri:=requestUri)
-            request.Headers.Accept.Clear()
-            request.Headers.Accept.Add(New System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"))
-            request.Headers.UserAgent.ParseAdd("CareLink/6.0.1.6 (Android; Dalvik/2.1.0)")
-
-            Using response As HttpResponseMessage = Await s_http.SendAsync(request:=request, completionOption:=HttpCompletionOption.ResponseHeadersRead)
-                Dim body As String = Await response.Content.ReadAsStringAsync()
-                If Not response.IsSuccessStatusCode Then
-                    Throw New HttpRequestException(message:=$"CareLink discovery request failed with HTTP {CInt(response.StatusCode)} ({response.ReasonPhrase}).")
-                End If
-                If String.IsNullOrWhiteSpace(body) Then
-                    Throw New ApplicationException(message:="CareLink discovery returned an empty response.")
-                End If
-                Return body
-            End Using
-        End Using
-    End Function
-
-'@
-            if ($service.IndexOf($marker, [StringComparison]::Ordinal) -lt 0) { throw 'ResolveEndpointConfigAsync marker not found.' }
-            $service = $service.Replace($marker, $helper + $marker)
-          }
-
-          $service = $service.Replace('Dim discoveryJson As String =' + [Environment]::NewLine + '            Await s_http.GetStringAsync(requestUri:=discoveryUrl)', 'Dim discoveryJson As String = Await GetDiscoveryTextAsync(requestUri:=discoveryUrl)')
-          $service = $service.Replace('Dim ssoJson As String = Await s_http.GetStringAsync(requestUri:=ssoUrl)', 'Dim ssoJson As String = Await GetDiscoveryTextAsync(requestUri:=ssoUrl)')
-
           Set-Content -Path $servicePath -Value $service -Encoding UTF8
 
           $loginPath = 'src/CareLink/Dialogs/LoginDialog.vb'
@@ -80,18 +44,22 @@ jobs:
             $login = $login.Replace('Imports System.Net.Http' + [Environment]::NewLine, 'Imports System.Net.Http' + [Environment]::NewLine + 'Imports System.Threading.Tasks' + [Environment]::NewLine)
           }
           $oldDiscovery = 'Dim discoveryResult As DiscoveryRecord = Await GetDiscoveryDataAsync()'
-          $newDiscovery = @'
-            Me.LoginStatus.Text = "Loading CareLink discovery configuration..."
-            Me.Refresh()
-            Dim discoveryTask As Task(Of DiscoveryRecord) = GetDiscoveryDataAsync()
-            Dim discoveryCompleted As Task = Await Task.WhenAny(discoveryTask, Task.Delay(TimeSpan.FromSeconds(20)))
-            If Not Object.ReferenceEquals(discoveryCompleted, discoveryTask) Then
-                Throw New TimeoutException("CareLink discovery timed out after 20 seconds. Check your internet connection and try again.")
-            End If
-            Dim discoveryResult As DiscoveryRecord = Await discoveryTask
-'@
-          if ($login.IndexOf($oldDiscovery, [StringComparison]::Ordinal) -lt 0) { throw 'Discovery call marker not found in LoginDialog.' }
-          $login = $login.Replace($oldDiscovery, $newDiscovery.TrimEnd())
+          if ($login -match 'Task\.WhenAny\(discoveryTask') {
+            Write-Host 'Login discovery timeout is already present.'
+          } elseif ($login.IndexOf($oldDiscovery, [StringComparison]::Ordinal) -ge 0) {
+            $newDiscovery = '            Me.LoginStatus.Text = "Loading CareLink discovery configuration..."' + [Environment]::NewLine +
+                '            Me.Refresh()' + [Environment]::NewLine +
+                '            Dim discoveryTask As Task(Of DiscoveryRecord) = GetDiscoveryDataAsync()' + [Environment]::NewLine +
+                '            Dim discoveryCompleted As Task = Await Task.WhenAny(discoveryTask, Task.Delay(TimeSpan.FromSeconds(20)))' + [Environment]::NewLine +
+                '            If Not Object.ReferenceEquals(discoveryCompleted, discoveryTask) Then' + [Environment]::NewLine +
+                '                Throw New TimeoutException("CareLink discovery timed out after 20 seconds. Check your internet connection and try again.")' + [Environment]::NewLine +
+                '            End If' + [Environment]::NewLine +
+                '            Dim discoveryResult As DiscoveryRecord = Await discoveryTask'
+            $login = $login.Replace($oldDiscovery, $newDiscovery)
+          } else {
+            throw 'Discovery call marker not found in LoginDialog.'
+          }
+
           $login = $login.Replace('Me.Ok_Button.Enabled = False' + [Environment]::NewLine + '                Application.DoEvents()', 'Me.LoginStatus.Text = "Opening CareLink login..."' + [Environment]::NewLine + '                Me.Ok_Button.Enabled = False' + [Environment]::NewLine + '                Application.DoEvents()')
           $login = $login.Replace('Me.LoginStatus.Text = "Checking token file..."', 'Me.LoginStatus.Text = "Checking CareLink connection..."')
 
@@ -146,7 +114,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/CareLink/Helpers/LoginHelpers/CareLinkService.vb src/CareLink/Dialogs/LoginDialog.vb
-          if (-not (git diff --cached --quiet)) { git commit -m 'Fix CareLink discovery request handling'; git push } else { Write-Host 'Login source patch was already committed.' }
+          if (-not (git diff --cached --quiet)) { git commit -m 'Fix CareLink discovery login hang'; git push } else { Write-Host 'Login source patch was already committed.' }
 
       - name: Create application archive
         shell: pwsh
