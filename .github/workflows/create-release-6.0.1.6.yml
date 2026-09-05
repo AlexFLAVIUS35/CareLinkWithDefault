@@ -93,6 +93,18 @@ jobs:
         shell: pwsh
         run: .\.dotnet\dotnet.exe restore CareLink.sln
 
+      - name: Prepare Windows media resources for build
+        shell: pwsh
+        run: |
+          $target = 'D:\Windows\Media'
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          Copy-Item 'C:\Windows\Media\Alarm01.wav' "$target\Alarm01.wav" -Force
+          Copy-Item 'C:\Windows\Media\Alarm02.wav' "$target\Alarm02.wav" -Force
+          if (-not (Test-Path "$target\Alarm01.wav") -or -not (Test-Path "$target\Alarm02.wav")) {
+            throw 'Could not prepare Windows alarm resources.'
+          }
+          Write-Host 'Windows alarm resources prepared for MSBuild.'
+
       - name: Build and publish Windows app
         shell: pwsh
         run: |
