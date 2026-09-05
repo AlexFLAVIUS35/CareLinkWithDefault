@@ -269,6 +269,7 @@ Public Class LoginDialog
                 Me.LoginStatus.Text = "Opening CareLink login..."
                 Me.LoginStatus.Text = "Opening CareLink login..."
                 Me.LoginStatus.Text = "Opening CareLink login..."
+                Me.LoginStatus.Text = "Opening CareLink login..."
                 Me.Ok_Button.Enabled = False
                 Application.DoEvents()
                 Dim territory As WorldRegion =
@@ -571,6 +572,7 @@ Public Class LoginDialog
     End Function
 
 End Class
+
 
 
 
