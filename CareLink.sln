@@ -24,7 +24,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Copilot", "Copilot", "{B4FD
 		copilot-instructions.md = copilot-instructions.md
 	EndProjectSection
 EndProject
-Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "TestProject", "TestProject\TestProject.vbproj", "{8E0980D7-75E2-4DBD-B969-DB9D1B5C8FCB}"
+Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "TestProject", "src\TestProject\TestProject.vbproj", "{8E0980D7-75E2-4DBD-B969-DB9D1B5C8FCB}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
