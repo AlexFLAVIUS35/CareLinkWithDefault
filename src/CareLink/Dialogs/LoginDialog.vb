@@ -5,6 +5,7 @@
 Imports System.ComponentModel
 Imports System.Net
 Imports System.Net.Http
+Imports System.Threading.Tasks
 
 Public Class LoginDialog
     Private _doCancel As Boolean
@@ -253,11 +254,19 @@ Public Class LoginDialog
             Me.LoginStatus.Text = "Checking CareLink connection..."
             Dim lastErrorMsg As String
             Dim discovertTupleStatusCode As HttpStatusCode = HttpStatusCode.OK
-            Dim discoveryResult As DiscoveryRecord = Await GetDiscoveryDataAsync()
+                        Me.LoginStatus.Text = "Loading CareLink discovery configuration..."
+            Me.Refresh()
+            Dim discoveryTask As Task(Of DiscoveryRecord) = GetDiscoveryDataAsync()
+            Dim discoveryCompleted As Task = Await Task.WhenAny(discoveryTask, Task.Delay(TimeSpan.FromSeconds(20)))
+            If Not Object.ReferenceEquals(discoveryCompleted, discoveryTask) Then
+                Throw New TimeoutException("CareLink discovery timed out after 20 seconds. Check your internet connection and try again.")
+            End If
+            Dim discoveryResult As DiscoveryRecord = Await discoveryTask
             Me.ClientDiscover = discoveryResult
             lastErrorMsg = discoveryResult.lastErrorMsg
             discovertTupleStatusCode = discoveryResult.httpStatusCode
             If Me.ClientDiscover IsNot Nothing Then
+                Me.LoginStatus.Text = "Opening CareLink login..."
                 Me.Ok_Button.Enabled = False
                 Application.DoEvents()
                 Dim territory As WorldRegion =
@@ -560,6 +569,7 @@ Public Class LoginDialog
     End Function
 
 End Class
+
 
 
 
