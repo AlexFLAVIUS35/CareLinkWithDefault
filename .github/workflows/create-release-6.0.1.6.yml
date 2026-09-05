@@ -55,6 +55,8 @@ jobs:
             ''
             '                Dim response As HttpResponseMessage = Await s_http.SendAsync(request)'
             '                Dim body As String = Await response.Content.ReadAsStringAsync()'
+            '            End Using'
+            '        End Using'
           )
           $replacement = $replacementLines -join "`r`n"
           $updated = [regex]::Replace($text, $pattern, $replacement, 1)
@@ -67,12 +69,6 @@ jobs:
             }
           } else {
             $text = $updated
-          }
-
-          if ($text -match 'Using content As New FormUrlEncodedContent' -and $text -notmatch 'End Using\s+End Using\s+End Function') {
-            $oldEnd = '        Return token\r?\n    End Function'
-            $newEnd = "        Return token`r`n            End Using`r`n        End Using`r`n    End Function"
-            $text = [regex]::Replace($text, $oldEnd, $newEnd, 1)
           }
 
           if ($text -notmatch 'client_secret' -or $text -notmatch 'CareLink/6\.0\.1\.6') {
