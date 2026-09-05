@@ -29,33 +29,17 @@ jobs:
         run: |
           $servicePath = "src/CareLink/Helpers/LoginHelpers/CareLinkService.vb"
           $service = Get-Content -Raw -Encoding UTF8 $servicePath
-
-          $service = $service.Replace(
-            'If String.IsNullOrWhiteSpace(value:=magIdentifier) Then',
-            'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
-
+          $service = $service.Replace('If String.IsNullOrWhiteSpace(value:=magIdentifier) Then', 'If Not String.IsNullOrWhiteSpace(value:=magIdentifier) Then')
           if ($service -notmatch 'If Not String\.IsNullOrWhiteSpace\(value:=magIdentifier\) Then') {
             throw 'mag-identifier header fix could not be verified.'
           }
-
           Set-Content -Path $servicePath -Value $service -Encoding UTF8
 
           $loginPath = "src/CareLink/Dialogs/LoginDialog.vb"
           $login = Get-Content -Raw -Encoding UTF8 $loginPath
           $login = $login.Replace('Me.LoginStatus.Text = "Checking token file..."', 'Me.LoginStatus.Text = "Checking CareLink connection..."')
-
           $catchPattern = '(?s)Catch ex As Exception\r?\n            Stop\r?\n        Finally\r?\n            Me\.Ok_Button\.Enabled = True\r?\n            Me\.Cancel_Button\.Enabled = True'
-          $catchReplacement = @'
-Catch ex As Exception
-            Dim errorMessage As String = If(String.IsNullOrWhiteSpace(ex.Message), "The login operation failed.", ex.Message)
-            ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))
-            Me.Ok_Button.Enabled = True
-            Me.Cancel_Button.Enabled = True
-            MessageBox.Show(Me, errorMessage, "CareLink Login", MessageBoxButtons.OK, MessageBoxIcon.Error)
-        Finally
-            Me.Ok_Button.Enabled = True
-            Me.Cancel_Button.Enabled = True
-'@
+          $catchReplacement = "Catch ex As Exception`r`n            Dim errorMessage As String = If(String.IsNullOrWhiteSpace(ex.Message), \"The login operation failed.\", ex.Message)`r`n            ReportLoginStatus(Me.LoginStatus, hasErrors:=True, lastErrorMsg:=errorMessage, lastHttpStatusCode:=CInt(HttpStatusCode.InternalServerError))`r`n            MessageBox.Show(Me, errorMessage, \"CareLink Login\", MessageBoxButtons.OK, MessageBoxIcon.Error)`r`n        Finally`r`n            Me.Ok_Button.Enabled = True`r`n            Me.Cancel_Button.Enabled = True"
           $patchedLogin = [regex]::Replace($login, $catchPattern, $catchReplacement, 1)
           if ($patchedLogin -eq $login) {
             throw 'LoginDialog exception handler could not be located.'
