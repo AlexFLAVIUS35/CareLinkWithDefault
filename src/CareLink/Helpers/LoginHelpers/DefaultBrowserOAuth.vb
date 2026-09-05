@@ -26,10 +26,10 @@ Friend Module DefaultBrowserOAuth
 
         Dim expectedPath As String = If(String.IsNullOrEmpty(redirect.AbsolutePath), "/", redirect.AbsolutePath)
         Dim expectedState As String = Guid.NewGuid().ToString("N")
-        Dim browserUrl As String = AddQueryParameter(startUrl, "state", expectedState)
+        Dim browserUrl As String = AddStateIfMissing(startUrl, expectedState)
 
         ' Use TcpListener rather than HttpListener. HttpListener relies on HTTP.sys URL ACLs
-        ' and can fail or hang on otherwise-valid user installations.
+        ' and can fail on otherwise-valid user installations.
         Using listener As New TcpListener(IPAddress.Loopback, redirect.Port)
             Try
                 listener.Start()
@@ -138,9 +138,13 @@ Friend Module DefaultBrowserOAuth
         End Using
     End Function
 
-    Private Shared Function AddQueryParameter(url As String, name As String, value As String) As String
+    Private Shared Function AddStateIfMissing(url As String, state As String) As String
+        ' Non-Auth0 already supplies a state parameter. Do not append a second one.
+        If url.IndexOf("state=", StringComparison.OrdinalIgnoreCase) >= 0 Then
+            Return url
+        End If
         Dim separator As String = If(url.Contains("?"c), "&", "?")
-        Return url & separator & Uri.EscapeDataString(name) & "=" & Uri.EscapeDataString(value)
+        Return url & separator & "state=" & Uri.EscapeDataString(state)
     End Function
 
     Private Shared Async Function ReadRequestLineAsync(stream As NetworkStream,
@@ -149,8 +153,7 @@ Friend Module DefaultBrowserOAuth
         Dim singleByte(0) As Byte
 
         Do
-            Dim readTask As Task(Of Integer) = stream.ReadAsync(singleByte, 0, 1, cancellationToken)
-            Dim read As Integer = Await readTask
+            Dim read As Integer = Await stream.ReadAsync(singleByte, 0, 1, cancellationToken)
             If read = 0 Then
                 Exit Do
             End If
