@@ -71,26 +71,12 @@ Public Class CareLinkService
 
         Dim redirectResult As RedirectResult
 
-        ' Ensure the UI dialog and WebView2 initialization run on the UI thread.
-        redirectResult = Await InvokeOnUiThreadAsync(
-           work:=Function()
-                     Do
-                         Using frm As New OAuthBrowserForm(startUrl:=fullUrl,
-                                                           redirectUri,
-                                                           userName,
-                                                           password)
-                             Dim dr As DialogResult = frm.ShowDialog()
-                             If dr = DialogResult.OK Then
-                                 Return frm.Result
-                             ElseIf dr = DialogResult.Retry Then
-                                 ' Caller will recreate the dialog and try again
-                                 Continue Do
-                             Else
-                                 Throw New Exception(message:="Login was cancelled.")
-                             End If
-                         End Using
-                     Loop
-                 End Function)
+        ' Use the system default browser and capture the OAuth loopback redirect.
+        redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(
+            startUrl:=fullUrl,
+            redirectUri:=redirectUri,
+            userName:=userName,
+            password:=password)
 
         If redirectResult Is Nothing OrElse IsNullOrWhiteSpace(value:=redirectResult.Code) Then
             message = "Authorization code was not captured."
@@ -150,33 +136,21 @@ Public Class CareLinkService
 
         Using ssoDoc As JsonDocument = JsonDocument.Parse(json:=endpointConfig.SsoJson)
             Dim oauthClient As JsonElement =
-                ssoDoc.RootElement.GetProperty(propertyName:="oauth").
-                                   GetProperty(propertyName:="client").
-                                   GetProperty(propertyName:="client_ids")(index:=0)
+                ssoDoc.RootElement.GetProperty(propertyName:="oauth").GetProperty(propertyName:="client").GetProperty(propertyName:="client_ids")(index:=0)
             Dim clientId As String = oauthClient.GetProperty(propertyName:="client_id").GetString()
             Dim scope As String = oauthClient.GetProperty(propertyName:="scope").GetString()
             Dim redirectUri As String = oauthClient.GetProperty(propertyName:="redirect_uri").GetString()
             Dim organization As String =
-                ssoDoc.RootElement.GetProperty(propertyName:="oauth").
-                                   GetProperty(propertyName:="client").
-                                   GetProperty(propertyName:="organization").GetString()
+                ssoDoc.RootElement.GetProperty(propertyName:="oauth").GetProperty(propertyName:="client").GetProperty(propertyName:="organization").GetString()
 
             Dim initPath As String =
-                ssoDoc.RootElement.GetProperty(propertyName:="mag").
-                                   GetProperty(propertyName:="system_endpoints").
-                                   GetProperty(propertyName:="client_credential_init_endpoint_path").GetString()
+                ssoDoc.RootElement.GetProperty(propertyName:="mag").GetProperty(propertyName:="system_endpoints").GetProperty(propertyName:="client_credential_init_endpoint_path").GetString()
             Dim authPath As String =
-                ssoDoc.RootElement.GetProperty(propertyName:="oauth").
-                                   GetProperty(propertyName:="system_endpoints").
-                                   GetProperty(propertyName:="authorization_endpoint_path").GetString()
+                ssoDoc.RootElement.GetProperty(propertyName:="oauth").GetProperty(propertyName:="system_endpoints").GetProperty(propertyName:="authorization_endpoint_path").GetString()
             Dim registerPath As String =
-                ssoDoc.RootElement.GetProperty(propertyName:="mag").
-                                   GetProperty(propertyName:="system_endpoints").
-                                   GetProperty(propertyName:="device_register_endpoint_path").GetString()
+                ssoDoc.RootElement.GetProperty(propertyName:="mag").GetProperty(propertyName:="system_endpoints").GetProperty(propertyName:="device_register_endpoint_path").GetString()
             Dim tokenPath As String =
-                ssoDoc.RootElement.GetProperty(propertyName:="oauth").
-                                   GetProperty(propertyName:="system_endpoints").
-                                   GetProperty(propertyName:="token_endpoint_path").GetString()
+                ssoDoc.RootElement.GetProperty(propertyName:="oauth").GetProperty(propertyName:="system_endpoints").GetProperty(propertyName:="token_endpoint_path").GetString()
 
             Dim initUrl As String = $"{endpointConfig.ApiBaseUrl}{initPath}"
             Dim nameValueCollection As New Dictionary(Of String, String) From {
@@ -235,28 +209,14 @@ Public Class CareLinkService
                 End Using
 
                 Using providersDoc As JsonDocument = JsonDocument.Parse(json:=providersJson)
-                    Dim captchaUrl As String =
-                        providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0) _
-                                                 .GetProperty(propertyName:="provider") _
-                                                 .GetProperty(propertyName:="auth_url").GetString()
+                    Dim captchaUrl As String = providersDoc.RootElement.GetProperty(propertyName:="providers")(index:=0).GetProperty(propertyName:="provider").GetProperty(propertyName:="auth_url").GetString()
 
                     Dim redirectResult As RedirectResult
-                    Do
-                        Using frm As New OAuthBrowserForm(startUrl:=captchaUrl,
-                            redirectUri:=redirectUri,
-                            userName:=userName,
-                            password:=password)
-                            Dim dr As DialogResult = frm.ShowDialog()
-                            If dr = DialogResult.OK Then
-                                redirectResult = frm.Result
-                                Exit Do
-                            ElseIf dr = DialogResult.Retry Then
-                                Continue Do
-                            Else
-                                Throw New Exception(message:="Login was cancelled.")
-                            End If
-                        End Using
-                    Loop
+                    redirectResult = Await DefaultBrowserOAuth.CaptureRedirectAsync(
+                        startUrl:=captchaUrl,
+                        redirectUri:=redirectUri,
+                        userName:=userName,
+                        password:=password)
 
                     If redirectResult Is Nothing OrElse IsNullOrWhiteSpace(value:=redirectResult.Code) Then
                         Throw New Exception(message:="Captcha authorization code was not captured.")
@@ -359,11 +319,7 @@ Public Class CareLinkService
         Return $"{Name}={Uri.EscapeDataString(stringToEscape:=value)}"
     End Function
 
-    ''' <summary>
-    ''' Invokes the provided work on the application's UI thread (if an open form exists) and returns the result.
-    ''' This ensures COM/STA-bound UI components (like WebView2) are created and used on the UI thread.
-    ''' </summary>
-    Private Shared Function InvokeOnUiThreadAsync(Of T)(work As Func(Of T)) As Task(Of T)
+    Private Shared Async Function InvokeOnUiThreadAsync(Of T)(work As Func(Of T)) As Task(Of T)
         Dim tcs As New TaskCompletionSource(Of T)()
 
         Try
@@ -379,8 +335,6 @@ Public Class CareLinkService
                                                  End Try
                                              End Sub))
             Else
-                ' No open forms available; run synchronously on the current thread as a fallback.
-                ' This may still fail if not on an STA/UI thread, but in normal app lifetime there is a main form.
                 Dim result As T = work()
                 tcs.SetResult(result)
             End If
@@ -484,9 +438,6 @@ Public Class CareLinkService
                     Dim keyName As String = Nothing
                     For Each prop As JsonProperty In c.EnumerateObject()
                         If prop.Name.ContainsNoCase(value:="UseSSOConfiguration") Then
-                            ' The property named like "UseSSOConfiguration*" contains the name
-                            ' of the actual SSO configuration property. We need the property's
-                            ' value (the lookup key), not the property name itself.
                             keyName = prop.Value.GetString()
                             Exit For
                         End If
@@ -524,10 +475,3 @@ Public Class CareLinkService
     End Function
 
 End Class
-
-
-
-
-
-
-
