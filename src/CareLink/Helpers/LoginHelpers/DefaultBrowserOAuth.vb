@@ -17,7 +17,8 @@ Friend Module DefaultBrowserOAuth
                 $"The CareLink OAuth redirect URI is not a loopback HTTP URI: {redirectUri}")
         End If
 
-        Dim prefix As String = BuildListenerPrefix(redirect)
+        ' Listen only on the loopback interface. The callback path is checked below.
+        Dim prefix As String = $"http://{redirect.Host}:{redirect.Port}/"
 
         Using listener As New HttpListener()
             listener.Prefixes.Add(prefix)
@@ -29,7 +30,8 @@ Friend Module DefaultBrowserOAuth
             Process.Start(browserInfo)
 
             Dim contextTask As Task(Of HttpListenerContext) = listener.GetContextAsync()
-            Dim completedTask As Task = Await Task.WhenAny(contextTask, Task.Delay(Timeout.Infinite, cancellationToken))
+            Dim completedTask As Task = Await Task.WhenAny(contextTask,
+                                                          Task.Delay(Timeout.Infinite, cancellationToken))
 
             If completedTask IsNot contextTask Then
                 Throw New OperationCanceledException(cancellationToken)
@@ -87,22 +89,6 @@ Friend Module DefaultBrowserOAuth
                 .Code = code,
                 .State = state}
         End Using
-    End Function
-
-    Private Function BuildListenerPrefix(redirect As Uri) As String
-        Dim builder As New UriBuilder(redirect) With {
-            .Query = String.Empty,
-            .Fragment = String.Empty}
-
-        Dim path As String = builder.Path
-        If String.IsNullOrWhiteSpace(path) Then
-            path = "/"
-        ElseIf Not path.EndsWith("/", StringComparison.Ordinal) Then
-            path &= "/"
-        End If
-
-        builder.Path = path
-        Return builder.Uri.AbsoluteUri
     End Function
 
     Private Sub WriteResponse(response As HttpListenerResponse,
