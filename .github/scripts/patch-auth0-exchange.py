@@ -1,0 +1,94 @@
+from pathlib import Path
+
+path = Path("src/CareLink/Helpers/LoginHelpers/CareLinkService.vb")
+s = path.read_text(encoding="utf-8-sig")
+
+if "client_secret" in s and "CareLink/6.0.1.6" in s:
+    print("Auth0 exchange is already patched.")
+    raise SystemExit(0)
+
+old = '''        Dim clientId As String = client.ClientId
+        Dim scope As String = client.Scope
+'''
+new = '''        Dim clientId As String = client.ClientId
+        Dim clientSecret As String = client.ClientSecret
+        Dim scope As String = client.Scope
+'''
+if old not in s:
+    raise SystemExit("Could not find Auth0 client configuration block.")
+s = s.replace(old, new, 1)
+
+old = '''        Dim form As New List(Of KeyValuePair(Of String, String)) From {
+            New KeyValuePair(Of String, String)(key:="grant_type", value:="authorization_code"),
+            New KeyValuePair(Of String, String)(key:="client_id", value:=clientId),
+            New KeyValuePair(Of String, String)(key:="code", value:=redirectResult.Code),
+            New KeyValuePair(Of String, String)(key:="redirect_uri", value:=redirectUri)}
+
+        Dim content As New FormUrlEncodedContent(nameValueCollection:=form)
+        Dim response As HttpResponseMessage = Await s_http.PostAsync(requestUri:=tokenUrl, content)
+'''
+new = '''        Dim form As New List(Of KeyValuePair(Of String, String)) From {
+            New KeyValuePair(Of String, String)(key:="grant_type", value:="authorization_code"),
+            New KeyValuePair(Of String, String)(key:="client_id", value:=clientId),
+            New KeyValuePair(Of String, String)(key:="code", value:=redirectResult.Code),
+            New KeyValuePair(Of String, String)(key:="redirect_uri", value:=redirectUri)}
+
+        If Not String.IsNullOrWhiteSpace(clientSecret) Then
+            form.Add(New KeyValuePair(Of String, String)(key:="client_secret", value:=clientSecret))
+        End If
+
+        Using content As New FormUrlEncodedContent(nameValueCollection:=form)
+            Using request As New HttpRequestMessage(method:=HttpMethod.Post, requestUri:=tokenUrl)
+                request.Headers.Accept.Add(New Headers.MediaTypeWithQualityHeaderValue("application/json"))
+                request.Headers.UserAgent.ParseAdd("CareLink/6.0.1.6")
+                request.Content = content
+                Dim response As HttpResponseMessage = Await s_http.SendAsync(request)
+'''
+if old not in s:
+    raise SystemExit("Could not find Auth0 token request block.")
+s = s.replace(old, new, 1)
+
+old = '''        If Not response.IsSuccessStatusCode Then
+            message = $"Could not get token data in {NameOf(DoLoginAuth0Async)}: {body}"
+            Throw New Exception(message)
+        End If
+
+        Dim token As TokenData = Nothing
+'''
+new = '''                If Not response.IsSuccessStatusCode Then
+                    message = $"Could not get token data in {NameOf(DoLoginAuth0Async)}: {body}"
+                    Throw New Exception(message)
+                End If
+
+                Dim token As TokenData = Nothing
+'''
+if old not in s:
+    raise SystemExit("Could not find Auth0 response block.")
+s = s.replace(old, new, 1)
+
+old = '''        If Not body.TryFromJson(result:=token) Then
+            message = "Failed to parse token response JSON."
+            Throw New ApplicationException(message)
+        End If
+        token.ClientId = clientId
+        WriteTokenFile(token, path:=outputFile)
+        Return token
+    End Function
+'''
+new = '''                If Not body.TryFromJson(result:=token) Then
+                    message = "Failed to parse token response JSON."
+                    Throw New ApplicationException(message)
+                End If
+                token.ClientId = clientId
+                WriteTokenFile(token, path:=outputFile)
+                Return token
+            End Using
+        End Using
+    End Function
+'''
+if old not in s:
+    raise SystemExit("Could not find Auth0 method ending.")
+s = s.replace(old, new, 1)
+
+path.write_text(s, encoding="utf-8-sig", newline="\n")
+print("Auth0 token exchange patched successfully.")
